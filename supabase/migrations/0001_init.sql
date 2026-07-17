@@ -457,7 +457,7 @@ declare t text;
 begin
   foreach t in array array[
     'suppliers','locations','profiles','products','variants','purchase_orders',
-    'shipments','goods_outwards','customers','orders','returns',
+    'shipments','goods_outwards','customers','returns',
     'import_templates','export_mappings'
   ] loop
     execute format('create trigger %I_set_updated_at before update on %I
