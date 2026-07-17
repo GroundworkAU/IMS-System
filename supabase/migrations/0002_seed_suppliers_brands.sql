@@ -4,7 +4,12 @@
 -- ============================================================================
 
 -- Supplier display names should be unique (enables clean lookups + re-runs).
-alter table suppliers add constraint suppliers_name_key unique (name);
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'suppliers_name_key') then
+    alter table suppliers add constraint suppliers_name_key unique (name);
+  end if;
+end $$;
 
 insert into suppliers (name) values
   ('Ashtabula'),
