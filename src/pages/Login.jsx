@@ -1,26 +1,32 @@
 import { useState } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
 export default function Login() {
-  const { session, signInWithEmail } = useAuth()
+  const { session, signIn } = useAuth()
   const [email, setEmail] = useState('')
-  const [status, setStatus] = useState(null) // {type, text}
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
 
   if (session) return <Navigate to="/" replace />
 
-  async function handleSend() {
-    if (!email.trim()) {
-      setStatus({ type: 'err', text: 'Enter your work email to continue.' })
+  async function handleSignIn() {
+    if (!email.trim() || !password) {
+      setError('Enter your email and password to continue.')
       return
     }
     setBusy(true)
-    setStatus(null)
-    const { error } = await signInWithEmail(email.trim())
+    setError(null)
+    const { error } = await signIn(email.trim(), password)
     setBusy(false)
-    if (error) setStatus({ type: 'err', text: error.message })
-    else setStatus({ type: 'ok', text: 'Check your inbox ~ we sent you a sign-in link.' })
+    if (error) {
+      setError(
+        error.message === 'Invalid login credentials'
+          ? 'That email and password combination did not work. Try again, or reset your password.'
+          : error.message
+      )
+    }
   }
 
   return (
@@ -29,32 +35,56 @@ export default function Login() {
         <div className="auth-brand">
           <div className="brand-mark">IMS</div>
           <div>
-            <div className="brand-name" style={{ color: '#17201f' }}>IMS System</div>
-            <div className="brand-sub" style={{ color: '#6a7570' }}>PAFC Inventory</div>
+            <div className="brand-name" style={{ color: 'var(--dark-brown)' }}>IMS System</div>
+            <div className="brand-sub" style={{ color: 'var(--muted)' }}>Inventory management</div>
           </div>
         </div>
+
         <h1 className="auth-title">Sign in</h1>
-        <p className="auth-sub">We'll email you a secure link ~ no password to remember.</p>
+        <p className="auth-sub">Welcome back. Enter your details to get to work.</p>
 
         <div className="field">
-          <label htmlFor="email">Work email</label>
+          <label htmlFor="email">Email</label>
           <input
             id="email"
             className="input"
             type="email"
             autoComplete="email"
-            placeholder="you@pafc.com.au"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
           />
         </div>
 
-        <button className="btn btn-primary" style={{ width: '100%' }} onClick={handleSend} disabled={busy}>
-          {busy ? 'Sending…' : 'Email me a sign-in link'}
+        <div className="field">
+          <label htmlFor="password">Password</label>
+          <input
+            id="password"
+            className="input"
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleSignIn()}
+          />
+        </div>
+
+        <button
+          className="btn btn-primary"
+          style={{ width: '100%' }}
+          onClick={handleSignIn}
+          disabled={busy}
+        >
+          {busy ? 'Signing in...' : 'Sign in'}
         </button>
 
-        {status && <div className={'auth-msg ' + (status.type === 'ok' ? 'ok' : 'err')}>{status.text}</div>}
+        {error && <div className="auth-msg err">{error}</div>}
+
+        <div className="auth-foot">
+          <Link className="linklike" to="/forgot-password">Forgot your password?</Link>
+          <span>
+            New here? <Link className="linklike" to="/signup">Create an account</Link>
+          </span>
+        </div>
       </div>
     </div>
   )

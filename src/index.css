@@ -245,3 +245,9 @@ select.input { background: var(--surface); }
   .grid-3 { grid-template-columns: 1fr; }
   .form-row > .field { flex: 1 1 100% !important; }
 }
+
+.auth-foot {
+  display: flex; flex-direction: column; gap: 8px;
+  margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--blush);
+  font-size: 13px; color: var(--muted);
+}
