@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/Modal'
 import { nextReference } from '../lib/references'
+import LineGroups from '../components/LineGroups'
 
 const formatDate = (d) =>
   d ? new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'
@@ -192,35 +193,20 @@ export default function Restocks() {
                       </button>
                     </div>
                   </header>
-                  <div className="return-card-body">
-                    <dl className="return-facts">
-                      <div>
-                        <dt>Started</dt>
-                        <dd>
-                          {formatDate(r.created_at)}
-                          <span className="cell-sub">by {r.requester?.full_name || 'Unknown'}</span>
-                        </dd>
-                      </div>
-                    </dl>
-                    <div className="return-items">
-                      <span className="panel-label">So far</span>
-                      <div className="item-list">
-                        {(r.restock_request_lines ?? []).slice(0, 6).map((l) => (
-                          <div key={l.id} className="item-line">
-                            <span className="item-qty">{l.qty_requested}</span>
-                            <span><span className="item-name">{l.name}</span></span>
-                          </div>
-                        ))}
-                        {(r.restock_request_lines ?? []).length > 6 && (
-                          <span className="cell-sub">
-                            and {(r.restock_request_lines ?? []).length - 6} more
-                          </span>
-                        )}
-                        {(r.restock_request_lines ?? []).length === 0 && (
-                          <span className="cell-sub">Nothing added yet</span>
-                        )}
-                      </div>
+                  <div className="stack-body">
+                    <div className="fact-row">
+                      <span>
+                        <span className="fact-label">Started</span>
+                        {formatDate(r.created_at)} by {r.requester?.full_name || 'Unknown'}
+                      </span>
                     </div>
+                    <LineGroups
+                      lines={(r.restock_request_lines ?? []).map((l) => ({
+                        id: l.id, name: l.name, qty: l.qty_requested,
+                      }))}
+                      limit={2}
+                      emptyText="Nothing added yet"
+                    />
                   </div>
                 </article>
               ))}
@@ -255,39 +241,33 @@ export default function Restocks() {
                     </div>
                   </header>
 
-                  <div className="return-card-body">
-                    <dl className="return-facts">
-                      <div>
-                        <dt>Requested</dt>
-                        <dd>
-                          {formatDate(r.created_at)}
-                          <span className="cell-sub">
-                            by {r.requester?.full_name || 'Unknown'}
-                          </span>
-                        </dd>
-                      </div>
+                  <div className="stack-body">
+                    <div className="fact-row">
+                      <span>
+                        <span className="fact-label">Requested</span>
+                        {formatDate(r.created_at)} by {r.requester?.full_name || 'Unknown'}
+                      </span>
+                      <span>
+                        <span className="fact-label">Items</span>
+                        {(r.restock_request_lines ?? []).reduce(
+                          (n, l) => n + (l.qty_requested || 0), 0
+                        )}{' '}
+                        across {(r.restock_request_lines ?? []).length} line
+                        {(r.restock_request_lines ?? []).length === 1 ? '' : 's'}
+                      </span>
                       {r.note && (
-                        <div><dt>Note</dt><dd>{r.note}</dd></div>
+                        <span>
+                          <span className="fact-label">Note</span>
+                          {r.note}
+                        </span>
                       )}
-                    </dl>
-
-                    <div className="return-items">
-                      <span className="panel-label">Items requested</span>
-                      <div className="item-list">
-                        {(r.restock_request_lines ?? []).map((l) => (
-                          <div key={l.id} className="item-line">
-                            <span className="item-qty">{l.qty_requested}</span>
-                            <span>
-                              <span className="item-name">{l.name}</span>
-                              <span className="cell-sub">
-                                {l.sku || 'No SKU'}
-                                {l.qty_fulfilled > 0 && ` · ${l.qty_fulfilled} fulfilled`}
-                              </span>
-                            </span>
-                          </div>
-                        ))}
-                      </div>
                     </div>
+
+                    <LineGroups
+                      lines={(r.restock_request_lines ?? []).map((l) => ({
+                        id: l.id, name: l.name, qty: l.qty_requested,
+                      }))}
+                    />
                   </div>
                 </article>
               ))}
@@ -324,53 +304,42 @@ export default function Restocks() {
                   </div>
                 </header>
 
-                <div className="return-card-body">
-                  <dl className="return-facts">
-                    <div>
-                      <dt>Fulfilled</dt>
-                      <dd>
-                        {formatDate(o.created_at)}
-                        <span className="cell-sub">by {o.fulfiller?.full_name || 'Unknown'}</span>
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Transfer on point of sale</dt>
-                      <dd>
-                        {o.external_transfer_id ? (
-                          <code className="code-ref">{o.external_transfer_id}</code>
-                        ) : (
-                          <span className="cell-sub">
-                            Not created yet ~ raise it in Lightspeed for now
-                          </span>
-                        )}
-                      </dd>
-                    </div>
-                    {o.note && <div><dt>Note</dt><dd>{o.note}</dd></div>}
-                  </dl>
-
-                  <div className="return-items">
-                    <span className="panel-label">Items</span>
-                    <div className="item-list">
-                      {(o.restock_order_lines ?? []).map((l) => {
-                        const short = l.qty_received != null && l.qty_received !== l.qty_sent
-                        return (
-                          <div key={l.id} className="item-line">
-                            <span className={'item-qty' + (short ? ' item-qty-bad' : '')}>
-                              {l.qty_sent}
-                            </span>
-                            <span>
-                              <span className="item-name">{l.name}</span>
-                              <span className="cell-sub">
-                                {l.sku || 'No SKU'}
-                                {l.qty_received != null && ` · ${l.qty_received} received`}
-                                {short && ` · off by ${l.qty_received - l.qty_sent}`}
-                              </span>
-                            </span>
-                          </div>
-                        )
-                      })}
-                    </div>
+                <div className="stack-body">
+                  <div className="fact-row">
+                    <span>
+                      <span className="fact-label">Fulfilled</span>
+                      {formatDate(o.created_at)} by {o.fulfiller?.full_name || 'Unknown'}
+                    </span>
+                    <span>
+                      <span className="fact-label">Transfer on point of sale</span>
+                      {o.external_transfer_id
+                        ? <code className="code-ref">{o.external_transfer_id}</code>
+                        : 'not created yet'}
+                    </span>
+                    {o.note && (
+                      <span><span className="fact-label">Note</span>{o.note}</span>
+                    )}
                   </div>
+
+                  <LineGroups
+                    lines={(o.restock_order_lines ?? []).map((l) => ({
+                      id: l.id,
+                      name: l.name,
+                      qty: l.qty_sent,
+                    }))}
+                  />
+
+                  {(o.restock_order_lines ?? []).some(
+                    (l) => l.qty_received != null && l.qty_received !== l.qty_sent
+                  ) && (
+                    <div className="placeholder-note" style={{ marginTop: 12 }}>
+                      Received short or over on{' '}
+                      {(o.restock_order_lines ?? []).filter(
+                        (l) => l.qty_received != null && l.qty_received !== l.qty_sent
+                      ).length}{' '}
+                      line(s). Open Check off received to see the detail.
+                    </div>
+                  )}
                 </div>
               </article>
             ))}
