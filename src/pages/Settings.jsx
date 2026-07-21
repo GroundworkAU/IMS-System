@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { PLATFORMS } from '../lib/platforms'
 import ConnectionCard from '../components/ConnectionCard'
+import Locations from './Locations'
 
 export default function Settings() {
   const { org, isAdmin, refresh } = useAuth()
@@ -177,6 +178,14 @@ export default function Settings() {
             </div>
           </>
         )}
+      </div>
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <p className="page-desc" style={{ marginBottom: 14 }}>
+          Everywhere you hold stock. Link each one to the systems you use so stock and transfers
+          line up, and say which system reports its stock.
+        </p>
+        <Locations embedded />
       </div>
 
       <div className="card" style={{ marginBottom: 16 }}>

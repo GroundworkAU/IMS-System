@@ -15,7 +15,7 @@ const TYPES = [
 
 const typeLabel = (v) => TYPES.find((t) => t.value === v)?.label ?? v
 
-export default function Locations() {
+export default function Locations({ embedded = false }) {
   const { profile, org } = useAuth()
   const orgPlatforms = org?.platforms ?? []
   const [locations, setLocations] = useState([])
@@ -122,14 +122,16 @@ export default function Locations() {
 
   return (
     <div>
-      <div className="page-head">
-        <div className="eyebrow">Inventory</div>
-        <h2 className="page-title">Locations</h2>
-        <p className="page-desc">
-          Everywhere you hold stock, physical or online. Stock is counted per location, and
-          orders are allocated across them.
-        </p>
-      </div>
+      {!embedded && (
+        <div className="page-head">
+          <div className="eyebrow">Inventory</div>
+          <h2 className="page-title">Locations</h2>
+          <p className="page-desc">
+            Everywhere you hold stock, physical or online. Stock is counted per location, and
+            orders are allocated across them.
+          </p>
+        </div>
+      )}
 
       {status && (
         <div className={'auth-msg ' + (status.type === 'ok' ? 'ok' : 'err')} style={{ marginBottom: 16 }}>
@@ -137,9 +139,11 @@ export default function Locations() {
         </div>
       )}
 
-      <div className="card">
+      <div className={embedded ? '' : 'card'}>
         <div className="card-head">
-          <h3 className="section-title" style={{ margin: 0 }}>Your locations</h3>
+          <h3 className="section-title" style={{ margin: 0 }}>
+            {embedded ? 'Locations' : 'Your locations'}
+          </h3>
           <button className="btn btn-primary" onClick={() => setModal({ values: { ...EMPTY }, id: null })}>
             Add location
           </button>

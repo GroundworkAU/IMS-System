@@ -16,7 +16,6 @@ const NAV = [
   {
     group: 'Inventory',
     items: [
-      { to: '/locations', label: 'Locations' },
       { to: '/restocks', label: 'Restocks' },
       { to: '/inbound', label: 'Inbound Shipments' },
       { to: '/goods-inwards', label: 'Goods Inwards' },
