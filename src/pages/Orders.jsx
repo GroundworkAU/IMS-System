@@ -42,6 +42,8 @@ export default function Orders() {
     let q = supabase
       .from('orders')
       .select('id, order_number, status, financial_status, order_date, total, raw, customers(first_name, last_name, email)')
+      // Incomplete orders are abandoned carts, never real orders.
+      .not('status', 'ilike', 'incomplete')
       .order('order_date', { ascending: false })
       .limit(100)
 
@@ -75,7 +77,11 @@ export default function Orders() {
         text: 'BigCommerce returned no orders. Check the API account has read access to Orders.',
       })
     } else {
-      setStatus({ type: 'ok', text: `Brought in ${res.imported} of ${res.fetched} orders.` })
+      const bits = [`Brought in ${res.imported} of ${res.fetched} orders`]
+      if (res.removedIncomplete > 0) {
+        bits.push(`cleared ${res.removedIncomplete} abandoned cart${res.removedIncomplete === 1 ? '' : 's'}`)
+      }
+      setStatus({ type: 'ok', text: bits.join(', ') + '.' })
       load(query)
     }
   }

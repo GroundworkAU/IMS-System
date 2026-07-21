@@ -247,11 +247,16 @@ async function syncBigCommerceOrders(sb, orgId, creds, sinceDays = 120) {
   }
 
   // Remove anything previously brought in as an incomplete cart.
-  await sb
+  let removedIncomplete = 0
+  const { data: binned, error: binErr } = await sb
     .from('orders')
     .delete()
     .eq('org_id', orgId)
-    .in('status', ['Incomplete', 'incomplete'])
+    .ilike('status', 'incomplete')
+    .select('id')
+
+  if (binErr) problems.push(`Could not clear incomplete orders: ${binErr.message}`)
+  else removedIncomplete = binned?.length ?? 0
 
   // Any open return whose order now shows as refunded on the platform gets
   // marked refunded automatically, so the list reflects reality without anyone
@@ -284,6 +289,7 @@ async function syncBigCommerceOrders(sb, orgId, creds, sinceDays = 120) {
     imported,
     fetched,
     autoClosed,
+    removedIncomplete,
     error: problems.length ? problems[0] : null,
   }
 }
