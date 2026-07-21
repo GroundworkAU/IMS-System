@@ -106,3 +106,8 @@ export async function checkRefunds(provider = 'bigcommerce') {
 export async function syncProducts(provider = 'bigcommerce') {
   return callIntegrations({ action: 'sync_products', provider })
 }
+
+// Import suppliers and brands from a connected platform.
+export async function syncSuppliers(provider = 'lightspeed') {
+  return callIntegrations({ action: 'sync_suppliers', provider })
+}

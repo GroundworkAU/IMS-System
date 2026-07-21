@@ -651,6 +651,14 @@ async function syncLightspeedProducts(sb, orgId, variant, creds) {
     if (ref) locationByExternal[String(ref)] = l.id
   }
 
+  // Brand names, so products do not all read "No brand".
+  let brandNames = {}
+  try {
+    brandNames = await lsBrandMap(variant, creds)
+  } catch (err) {
+    problems.push(`Brands: ${err.message}`)
+  }
+
   let products = 0
   let variants = 0
   let invFetched = 0      // records returned by the platform
@@ -683,7 +691,7 @@ async function syncLightspeedProducts(sb, orgId, variant, creds) {
             external_source: 'lightspeed',
             external_id: String(parentId),
             name: p.variant_parent_id ? (p.name || '').split(' / ')[0] : (p.name || 'Product'),
-            external_brand: p.brand_name || null,
+            external_brand: p.brand_name || brandNames[String(p.brand_id)] || null,
             image_url: p.image_thumbnail_url || null,
             status: 'active',
             last_synced_at: now,
@@ -799,7 +807,7 @@ async function syncLightspeedProducts(sb, orgId, variant, creds) {
         external_source: 'lightspeed',
         external_id: String(it.itemID),
         name: it.description || 'Product',
-        external_brand: null,
+        external_brand: brandNames[String(it.manufacturerID)] || null,
         status: 'active',
         last_synced_at: now,
       }))
@@ -885,6 +893,125 @@ async function syncLightspeedProducts(sb, orgId, variant, creds) {
     stockLocationMissing: Object.keys(locationByExternal).length === 0,
     error: problems.length ? problems[0] : null,
   }
+}
+
+// ---------------------------------------------------------------------------
+// Suppliers and brands. Platforms keep these as two unrelated lists, so brands
+// arrive without a supplier and can be matched up afterwards in the app.
+// ---------------------------------------------------------------------------
+async function lsBrandMap(variant, creds) {
+  const map = {}
+  if (variant === 'xseries') {
+    let after = 0
+    let guard = 0
+    while (guard < 10) {
+      guard += 1
+      const body = await lsFetch(variant, creds, `/api/2.0/brands?page_size=500&after=${after}`)
+      const list = body?.data ?? []
+      if (list.length === 0) break
+      for (const b of list) map[String(b.id)] = b.name
+      const maxVersion = list.reduce((m, b) => Math.max(m, Number(b.version ?? 0)), after)
+      if (maxVersion === after || list.length < 500) break
+      after = maxVersion
+    }
+  } else {
+    const body = await lsFetch(variant, creds, '/Manufacturer.json?limit=100')
+    const raw = body?.Manufacturer
+    const list = Array.isArray(raw) ? raw : raw ? [raw] : []
+    for (const b of list) map[String(b.manufacturerID)] = b.name
+  }
+  return map
+}
+
+async function syncLightspeedSuppliersAndBrands(sb, orgId, variant, creds) {
+  const problems = []
+  const now = new Date().toISOString()
+  let suppliers = 0
+  let brands = 0
+
+  // ---- suppliers ----
+  const supplierRows = []
+  try {
+    if (variant === 'xseries') {
+      let after = 0
+      let guard = 0
+      while (guard < 10) {
+        guard += 1
+        const body = await lsFetch(variant, creds, `/api/2.0/suppliers?page_size=500&after=${after}`)
+        const list = body?.data ?? []
+        if (list.length === 0) break
+        for (const sup of list) {
+          supplierRows.push({
+            org_id: orgId,
+            external_source: 'lightspeed',
+            external_id: String(sup.id),
+            name: sup.name || 'Supplier',
+            contact_name: sup.contact?.first_name
+              ? `${sup.contact.first_name} ${sup.contact.last_name ?? ''}`.trim()
+              : null,
+            email: sup.contact?.email || null,
+            phone: sup.contact?.phone || sup.contact?.mobile || null,
+            last_synced_at: now,
+          })
+        }
+        const maxVersion = list.reduce((m, x) => Math.max(m, Number(x.version ?? 0)), after)
+        if (maxVersion === after || list.length < 500) break
+        after = maxVersion
+      }
+    } else {
+      const body = await lsFetch(variant, creds, '/Vendor.json?limit=100')
+      const raw = body?.Vendor
+      const list = Array.isArray(raw) ? raw : raw ? [raw] : []
+      for (const sup of list) {
+        supplierRows.push({
+          org_id: orgId,
+          external_source: 'lightspeed',
+          external_id: String(sup.vendorID),
+          name: sup.name || 'Supplier',
+          contact_name: sup.contactName || null,
+          email: sup.Contact?.Emails?.ContactEmail?.address || null,
+          phone: sup.Contact?.Phones?.ContactPhone?.number || null,
+          last_synced_at: now,
+        })
+      }
+    }
+  } catch (err) {
+    problems.push(`Suppliers: ${err.message}`)
+  }
+
+  if (supplierRows.length) {
+    const { data, error } = await sb
+      .from('suppliers')
+      .upsert(supplierRows, { onConflict: 'org_id,external_source,external_id' })
+      .select('id')
+    if (error) problems.push(`Suppliers: ${error.message}`)
+    else suppliers = data?.length ?? 0
+  }
+
+  // ---- brands ----
+  try {
+    const map = await lsBrandMap(variant, creds)
+    const brandRows = Object.entries(map).map(([externalId, name]) => ({
+      org_id: orgId,
+      external_source: 'lightspeed',
+      external_id: externalId,
+      name,
+      last_synced_at: now,
+    }))
+
+    if (brandRows.length) {
+      const { data, error } = await sb
+        .from('brands')
+        .upsert(brandRows, { onConflict: 'org_id,external_source,external_id' })
+        .select('id')
+      if (error) problems.push(`Brands: ${error.message}`)
+      else brands = data?.length ?? 0
+    }
+  } catch (err) {
+    problems.push(`Brands: ${err.message}`)
+  }
+
+  return { suppliers, brands, error: problems.length ? problems[0] : null }
 }
 
 async function loadVariantMap(sb, orgId, source, problems) {
@@ -1041,7 +1168,8 @@ export default async function handler(req, res) {
     // --- sync orders from the platform -------------------------------------
     if (
       action === 'sync_orders' || action === 'order_lines' ||
-      action === 'check_refunds' || action === 'sync_products'
+      action === 'check_refunds' || action === 'sync_products' ||
+      action === 'sync_suppliers'
     ) {
       const { data: secret } = await sb
         .from('integration_secrets')
@@ -1050,11 +1178,28 @@ export default async function handler(req, res) {
         .maybeSingle()
 
       if (!secret) return res.status(400).json({ error: 'Not connected yet.' })
-      if (provider !== 'bigcommerce' && action !== 'sync_products') {
+      if (
+        provider !== 'bigcommerce' &&
+        action !== 'sync_products' && action !== 'sync_suppliers'
+      ) {
         return res.status(400).json({ error: 'Order sync currently supports BigCommerce.' })
       }
 
       try {
+        if (action === 'sync_suppliers') {
+          if (provider !== 'lightspeed') {
+            return res.status(400).json({ error: 'Supplier import supports Lightspeed.' })
+          }
+          const { data: setting } = await sb
+            .from('integration_settings')
+            .select('variant')
+            .match({ org_id: orgId, provider })
+            .maybeSingle()
+          const out = await syncLightspeedSuppliersAndBrands(
+            sb, orgId, setting?.variant ?? 'xseries', secret.credentials
+          )
+          return res.status(200).json({ ok: !out.error, ...out })
+        }
         if (action === 'sync_products') {
           if (provider === 'lightspeed') {
             const { data: setting } = await sb

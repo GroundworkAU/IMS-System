@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/Modal'
+import { syncSuppliers } from '../lib/integrations'
 
 const EMPTY_SUPPLIER = {
   name: '', contact_name: '', email: '', phone: '',
@@ -9,7 +10,9 @@ const EMPTY_SUPPLIER = {
 }
 
 export default function Suppliers() {
-  const { profile } = useAuth()
+  const { profile, org } = useAuth()
+  const [importing, setImporting] = useState(false)
+  const canImport = (org?.platforms ?? []).includes('lightspeed')
   const [suppliers, setSuppliers] = useState([])
   const [brands, setBrands] = useState([])
   const [loading, setLoading] = useState(true)
@@ -22,10 +25,10 @@ export default function Suppliers() {
     setLoading(true)
     const [s, b] = await Promise.all([
       supabase.from('suppliers')
-        .select('id, name, contact_name, email, phone, address, payment_terms, currency, notes, is_active')
+        .select('id, name, contact_name, email, phone, address, payment_terms, currency, notes, is_active, external_source')
         .order('name'),
       supabase.from('brands')
-        .select('id, name, is_active, supplier_id, suppliers(name)')
+        .select('id, name, is_active, supplier_id, external_source, suppliers(name)')
         .order('name'),
     ])
     if (s.error) setStatus({ type: 'err', text: s.error.message })
@@ -37,6 +40,23 @@ export default function Suppliers() {
   useEffect(() => { load() }, [load])
 
   const brandCount = (id) => brands.filter((b) => b.supplier_id === id).length
+
+  async function handleImport() {
+    setImporting(true)
+    setStatus(null)
+    const res = await syncSuppliers('lightspeed')
+    setImporting(false)
+    if (res.error) {
+      setStatus({ type: 'err', text: `Import problem: ${res.error}` })
+    } else {
+      setStatus({
+        type: 'ok',
+        text: `Imported ${res.suppliers} suppliers and ${res.brands} brands. ` +
+              'Brands come across without a supplier ~ edit one to link it up.',
+      })
+    }
+    load()
+  }
 
   async function saveSupplier(values, id) {
     if (!values.name.trim()) {
@@ -74,14 +94,14 @@ export default function Suppliers() {
   }
 
   async function saveBrand(values, id) {
-    if (!values.name.trim() || !values.supplier_id) {
-      setStatus({ type: 'err', text: 'A brand needs a name and a supplier.' })
+    if (!values.name.trim()) {
+      setStatus({ type: 'err', text: 'Give the brand a name.' })
       return
     }
     setBusy(true)
     const payload = {
       name: values.name.trim(),
-      supplier_id: values.supplier_id,
+      supplier_id: values.supplier_id || null,
       is_active: values.is_active,
     }
     const { error } = id
@@ -158,12 +178,19 @@ export default function Suppliers() {
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="card-head">
           <h3 className="section-title" style={{ margin: 0 }}>Suppliers</h3>
-          <button
-            className="btn btn-primary"
-            onClick={() => setSupplierModal({ values: { ...EMPTY_SUPPLIER }, id: null })}
-          >
-            Add supplier
-          </button>
+          <div className="search-wrap">
+            {canImport && (
+              <button className="btn" onClick={handleImport} disabled={importing}>
+                {importing ? 'Importing...' : 'Import from Lightspeed'}
+              </button>
+            )}
+            <button
+              className="btn btn-primary"
+              onClick={() => setSupplierModal({ values: { ...EMPTY_SUPPLIER }, id: null })}
+            >
+              Add supplier
+            </button>
+          </div>
         </div>
 
         {loading ? (
@@ -233,7 +260,6 @@ export default function Suppliers() {
           <h3 className="section-title" style={{ margin: 0 }}>Brands</h3>
           <button
             className="btn btn-primary"
-            disabled={suppliers.length === 0}
             onClick={() =>
               setBrandModal({ values: { name: '', supplier_id: '', is_active: true }, id: null })
             }
@@ -242,11 +268,7 @@ export default function Suppliers() {
           </button>
         </div>
 
-        {suppliers.length === 0 ? (
-          <div className="empty-state">
-            <p className="page-desc">Add a supplier first, then you can attach brands to it.</p>
-          </div>
-        ) : loading ? (
+        {loading ? (
           <p className="page-desc">Loading...</p>
         ) : brands.length === 0 ? (
           <div className="empty-state">
@@ -266,7 +288,9 @@ export default function Suppliers() {
                 {brands.map((b) => (
                   <tr key={b.id} className={b.is_active ? '' : 'row-muted'}>
                     <td className="cell-strong">{b.name}</td>
-                    <td>{b.suppliers?.name || '-'}</td>
+                    <td>
+                      {b.suppliers?.name || <span className="cell-sub">Not linked</span>}
+                    </td>
                     <td>{b.is_active ? 'Active' : 'Inactive'}</td>
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                       <button
@@ -425,13 +449,14 @@ function BrandModal({ initial, id, suppliers, busy, onClose, onSave }) {
       <div className="field">
         <label htmlFor="b-supplier">Supplier</label>
         <select id="b-supplier" className="input" value={v.supplier_id} onChange={set('supplier_id')}>
-          <option value="">Choose a supplier...</option>
+          <option value="">No supplier yet</option>
           {suppliers.map((s) => (
             <option key={s.id} value={s.id}>{s.name}</option>
           ))}
         </select>
         <p className="field-hint">
-          Orders for this brand will use this supplier automatically.
+          Orders for this brand will use this supplier automatically. Imported brands start
+          without one ~ set it here.
         </p>
       </div>
 
