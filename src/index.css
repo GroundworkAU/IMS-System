@@ -532,3 +532,21 @@ a.btn { display: inline-block; text-decoration: none; }
   background: var(--deep-brown); border-color: var(--deep-brown); color: var(--cream);
 }
 .btn-selected:hover { background: var(--dark-brown); border-color: var(--dark-brown); }
+
+/* ---------- Filter bar ---------- */
+.filter-bar {
+  display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end;
+  padding: 14px; margin-bottom: 16px;
+  background: var(--cream); border: 1px solid var(--blush); border-radius: 10px;
+}
+.filter-field { display: flex; flex-direction: column; gap: 5px; }
+.filter-field label {
+  font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--muted); font-weight: 700;
+}
+.filter-actions { display: flex; gap: 8px; align-items: center; }
+
+@media (max-width: 620px) {
+  .filter-field { flex: 1 1 100% !important; }
+  .filter-actions { width: 100%; }
+}
