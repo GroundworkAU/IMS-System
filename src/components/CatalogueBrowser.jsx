@@ -170,7 +170,7 @@ export default function CatalogueBrowser({ selected, onChange, destinationId, fu
                 {isOpen && (
                   <div className="product-variants">
                     {(p.variants ?? []).map((v) => {
-                      const { here, elsewhere } = stockSplit(v)
+                      const levels = stockByLocation(v)
                       return (
                         <div key={v.id} className="browse-variant">
                           <span className="browse-variant-main">

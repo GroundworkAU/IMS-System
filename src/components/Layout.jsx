@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import ErrorBoundary from './ErrorBoundary'
 
 const NAV = [
   { group: 'Overview', items: [{ to: '/', label: 'Dashboard', end: true }] },
@@ -144,7 +145,9 @@ export default function Layout() {
         <div className="checker-strip" />
 
         <main className="content">
-          <Outlet />
+          <ErrorBoundary key={pathname}>
+            <Outlet />
+          </ErrorBoundary>
         </main>
       </div>
     </div>
