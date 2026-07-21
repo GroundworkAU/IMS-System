@@ -24,6 +24,7 @@ const NAV = [
   {
     group: 'Service',
     items: [
+      { to: '/orders', label: 'Orders' },
       { to: '/customer-service', label: 'Customer Service' },
       { to: '/returns', label: 'Returns' },
     ],

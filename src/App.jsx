@@ -14,6 +14,7 @@ import Locations from './pages/Locations'
 import Inbound from './pages/Inbound'
 import GoodsInwards from './pages/GoodsInwards'
 import GoodsOutwards from './pages/GoodsOutwards'
+import Orders from './pages/Orders'
 import CustomerService from './pages/CustomerService'
 import Returns from './pages/Returns'
 import Admin from './pages/Admin'
@@ -42,6 +43,7 @@ export default function App() {
         <Route path="/inbound" element={<Inbound />} />
         <Route path="/goods-inwards" element={<GoodsInwards />} />
         <Route path="/goods-outwards" element={<GoodsOutwards />} />
+        <Route path="/orders" element={<Orders />} />
         <Route path="/customer-service" element={<CustomerService />} />
         <Route path="/returns" element={<Returns />} />
         <Route path="/admin" element={<Admin />} />
