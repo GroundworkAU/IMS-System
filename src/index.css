@@ -327,3 +327,9 @@ select.input { background: var(--surface); }
 .btn-quiet:hover { color: var(--red); }
 textarea.input { resize: vertical; font-family: inherit; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.code-ref {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px; background: var(--cream); border: 1px solid var(--blush);
+  padding: 2px 7px; border-radius: 5px; color: var(--deep-brown);
+}
