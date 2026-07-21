@@ -590,3 +590,6 @@ a.btn { display: inline-block; text-decoration: none; }
   margin: 8px 0 0; font-size: 13.5px; line-height: 1.55;
   background: var(--cream); border-radius: 8px; padding: 10px 12px;
 }
+
+.order-link { color: var(--deep-brown); text-decoration: underline; text-underline-offset: 2px; }
+.order-link:hover { color: var(--dark-brown); }

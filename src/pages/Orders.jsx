@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { syncOrders, loadOrderLines } from '../lib/integrations'
 import Modal from '../components/Modal'
 import OrderIssuesModal from '../components/OrderIssuesModal'
+import { useIntegrationConfigs, orderAdminUrl } from '../lib/platformLinks'
 
 const money = (n) =>
   new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(Number(n || 0))
@@ -41,6 +42,7 @@ export default function Orders() {
   const [statusOptions, setStatusOptions] = useState([])
   const [issueOrderIds, setIssueOrderIds] = useState(new Set())
   const [issuesFor, setIssuesFor] = useState(null)
+  const configs = useIntegrationConfigs()
 
   const connected = (org?.platforms ?? []).includes('bigcommerce')
 
@@ -55,7 +57,7 @@ export default function Orders() {
     setLoading(true)
     let q = supabase
       .from('orders')
-      .select('id, order_number, status, financial_status, order_date, total, raw, customers(first_name, last_name, email)')
+      .select('id, order_number, external_order_id, status, financial_status, order_date, total, raw, customers(first_name, last_name, email), sales_channels(platform)')
       // Incomplete orders are abandoned carts, never real orders.
       .not('status', 'ilike', 'incomplete')
       .order('order_date', { ascending: false })
@@ -258,7 +260,24 @@ export default function Orders() {
                 {orders.map((o) => (
                   <tr key={o.id}>
                     <td>
-                      <span className="cell-strong">#{o.order_number}</span>
+                      {(() => {
+                        const url = orderAdminUrl(
+                          configs, o.sales_channels?.platform, o.external_order_id
+                        )
+                        return url ? (
+                          <a
+                            className="cell-strong order-link"
+                            href={url}
+                            target="_blank"
+                            rel="noreferrer"
+                            title="Open this order in the sales platform"
+                          >
+                            #{o.order_number}
+                          </a>
+                        ) : (
+                          <span className="cell-strong">#{o.order_number}</span>
+                        )
+                      })()}
                       {issueOrderIds.has(o.id) && (
                         <button
                           className="flag-pill flag-pill-button"

@@ -243,9 +243,21 @@ export default function Returns() {
                 <article key={r.id} className="return-card">
                   <header className="return-card-head">
                     <div className="return-ident">
-                      <span className="return-order">
-                        {r.order_number ? `#${r.order_number}` : 'No order'}
-                      </span>
+                      {link ? (
+                        <a
+                          className="return-order order-link"
+                          href={link}
+                          target="_blank"
+                          rel="noreferrer"
+                          title="Open this order in the sales platform"
+                        >
+                          #{r.order_number}
+                        </a>
+                      ) : (
+                        <span className="return-order">
+                          {r.order_number ? `#${r.order_number}` : 'No order'}
+                        </span>
+                      )}
                       <span className="return-customer">{customerName(r)}</span>
                     </div>
 

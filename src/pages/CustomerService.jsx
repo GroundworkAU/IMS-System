@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { loadOrderLines } from '../lib/integrations'
 import Modal from '../components/Modal'
 import OrderIssuesModal from '../components/OrderIssuesModal'
+import { useIntegrationConfigs, orderAdminUrl } from '../lib/platformLinks'
 import { useNavigate } from 'react-router-dom'
 
 // Sensible starting set. requires_items decides whether the person raising the
@@ -41,6 +42,7 @@ export default function CustomerService() {
   const [issueOrderIds, setIssueOrderIds] = useState(new Set())
   const [issuesFor, setIssuesFor] = useState(null)
   const navigate = useNavigate()
+  const configs = useIntegrationConfigs()
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -49,7 +51,8 @@ export default function CustomerService() {
         .select(`id, reference, order_number, reason, detail, status, created_at,
                  resolved_at, resolution_note,
                  raised:raised_by(full_name), resolver:resolved_by(full_name),
-                 orders(id, order_date, customers(first_name, last_name, email)),
+                 orders(id, order_date, external_order_id, sales_channels(platform),
+                        customers(first_name, last_name, email)),
                  order_issue_lines(id, qty, note, order_lines(name, sku))`)
         .order('created_at', { ascending: false })
         .limit(100),
@@ -70,7 +73,7 @@ export default function CustomerService() {
         .eq('status', 'open'),
       // Anything still waiting, placed three or more days ago.
       supabase.from('orders')
-        .select('id, order_number, status, order_date, total, customers(first_name, last_name, email)')
+        .select('id, order_number, external_order_id, status, order_date, total, customers(first_name, last_name, email), sales_channels(platform)')
         .not('status', 'in', '("Shipped","Completed","Cancelled","Declined","Refunded","Partially Refunded","Disputed","Incomplete")')
         .lte('order_date', threeDaysAgo)
         .order('order_date', { ascending: true })
@@ -189,7 +192,24 @@ export default function CustomerService() {
                   return (
                     <tr key={o.id}>
                       <td>
-                        <span className="cell-strong">#{o.order_number}</span>
+                        {(() => {
+                          const url = orderAdminUrl(
+                            configs, o.sales_channels?.platform, o.external_order_id
+                          )
+                          return url ? (
+                            <a
+                              className="cell-strong order-link"
+                              href={url}
+                              target="_blank"
+                              rel="noreferrer"
+                              title="Open this order in the sales platform"
+                            >
+                              #{o.order_number}
+                            </a>
+                          ) : (
+                            <span className="cell-strong">#{o.order_number}</span>
+                          )
+                        })()}
                         {issueOrderIds.has(o.id) && (
                           <button
                             className="flag-pill flag-pill-button"
@@ -281,9 +301,26 @@ export default function CustomerService() {
               <article key={i.id} className="return-card">
                 <header className="return-card-head">
                   <div className="return-ident">
-                    <span className="return-order">
-                      {i.order_number ? `#${i.order_number}` : 'No order'}
-                    </span>
+                    {(() => {
+                      const url = orderAdminUrl(
+                        configs, i.orders?.sales_channels?.platform, i.orders?.external_order_id
+                      )
+                      return url ? (
+                        <a
+                          className="return-order order-link"
+                          href={url}
+                          target="_blank"
+                          rel="noreferrer"
+                          title="Open this order in the sales platform"
+                        >
+                          #{i.order_number}
+                        </a>
+                      ) : (
+                        <span className="return-order">
+                          {i.order_number ? `#${i.order_number}` : 'No order'}
+                        </span>
+                      )
+                    })()}
                     <span className="return-customer">{customerName(i)}</span>
                   </div>
 
