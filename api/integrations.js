@@ -392,6 +392,7 @@ async function checkRefundsForOpenReturns(sb, orgId, creds) {
 // ---------------------------------------------------------------------------
 async function syncBigCommerceProducts(sb, orgId, creds) {
   const problems = []
+  const now = new Date().toISOString()
 
   // Brand names, so products read properly in the app.
   const brandNames = {}
@@ -408,129 +409,202 @@ async function syncBigCommerceProducts(sb, orgId, creds) {
     problems.push(`Could not read brands: ${err.message}`)
   }
 
-  // Stock lands at whichever locations say BigCommerce is their stock source.
-  const { data: locs, error: locErr } = await sb
-    .from('locations')
-    .select('id, name, stock_source')
-    .eq('org_id', orgId)
-    .eq('stock_source', 'bigcommerce')
-
-  if (locErr) problems.push(`Could not read locations: ${locErr.message}`)
-  const stockLocations = (locs ?? []).map((l) => l.id)
-
   let page = 1
   let products = 0
   let variants = 0
-  let stockRows = 0
-  const stock = []
-  const now = new Date().toISOString()
 
+  // Work a page at a time, writing in bulk rather than row by row. Doing a
+  // database round trip per product made this take minutes.
   while (page <= 20) {
     const body = await bcFetch(
       creds,
-      `/v3/catalog/products?limit=100&page=${page}&include=variants,primary_image`
+      `/v3/catalog/products?limit=250&page=${page}&include=variants,primary_image`
     )
     const list = body?.data ?? []
     if (list.length === 0) break
 
+    const productRows = list.map((p) => ({
+      org_id: orgId,
+      external_source: 'bigcommerce',
+      external_id: String(p.id),
+      name: p.name,
+      description: p.description
+        ? String(p.description).replace(/<[^>]*>/g, '').slice(0, 2000)
+        : null,
+      external_brand: p.brand_id ? (brandNames[p.brand_id] ?? null) : null,
+      image_url: p.primary_image?.url_thumbnail ?? null,
+      status: p.is_visible === false ? 'draft' : 'active',
+      last_synced_at: now,
+    }))
+
+    const { data: savedProducts, error: pErr } = await sb
+      .from('products')
+      .upsert(productRows, { onConflict: 'org_id,external_source,external_id' })
+      .select('id, external_id')
+
+    if (pErr) {
+      problems.push(`Products: ${pErr.message}`)
+      break
+    }
+    products += savedProducts?.length ?? 0
+
+    const productIdByExternal = {}
+    for (const row of savedProducts ?? []) productIdByExternal[row.external_id] = row.id
+
+    const variantRows = []
     for (const p of list) {
-      const { data: prod, error: pErr } = await sb
-        .from('products')
-        .upsert(
-          {
-            org_id: orgId,
-            external_source: 'bigcommerce',
-            external_id: String(p.id),
-            name: p.name,
-            description: p.description ? String(p.description).replace(/<[^>]*>/g, '').slice(0, 2000) : null,
-            external_brand: p.brand_id ? (brandNames[p.brand_id] ?? null) : null,
-            image_url: p.primary_image?.url_thumbnail ?? null,
-            status: p.is_visible === false ? 'draft' : 'active',
-            last_synced_at: now,
-          },
-          { onConflict: 'org_id,external_source,external_id' }
-        )
-        .select('id')
-        .single()
+      const productId = productIdByExternal[String(p.id)]
+      if (!productId) continue
 
-      if (pErr) {
-        if (problems.length < 3) problems.push(pErr.message)
-        continue
-      }
-      products += 1
-
-      // BigCommerce always returns at least one variant per product.
       const vs = Array.isArray(p.variants) && p.variants.length
         ? p.variants
         : [{ id: `${p.id}-base`, sku: p.sku, price: p.price, cost_price: p.cost_price }]
 
-      const rows = vs.map((v) => ({
-        org_id: orgId,
-        product_id: prod.id,
-        external_source: 'bigcommerce',
-        external_id: String(v.id),
-        sku: v.sku || null,
-        option_name: Array.isArray(v.option_values)
-          ? v.option_values.map((o) => o.label).join(' / ') || null
-          : null,
-        barcode: v.upc || v.gtin || null,
-        unit_cost: Number(v.cost_price ?? p.cost_price ?? 0),
-        retail_price: Number(v.price ?? p.price ?? 0),
-        last_synced_at: now,
-      }))
-
-      const { data: savedVariants, error: vErr } = await sb
-        .from('variants')
-        .upsert(rows, { onConflict: 'org_id,external_source,external_id' })
-        .select('id, external_id')
-
-      if (vErr) {
-        if (problems.length < 3) problems.push(vErr.message)
-      } else {
-        variants += rows.length
-
-        for (const locationId of stockLocations) {
-          for (const v of vs) {
-            const saved = (savedVariants ?? []).find((x) => x.external_id === String(v.id))
-            if (!saved) continue
-            const level = v.inventory_level ?? p.inventory_level
-            if (level == null) continue
-            stock.push({
-              org_id: orgId,
-              variant_id: saved.id,
-              location_id: locationId,
-              on_hand: Number(level) || 0,
-              updated_at: now,
-            })
-          }
-        }
+      for (const v of vs) {
+        variantRows.push({
+          org_id: orgId,
+          product_id: productId,
+          external_source: 'bigcommerce',
+          external_id: String(v.id),
+          sku: v.sku || null,
+          option_name: Array.isArray(v.option_values)
+            ? v.option_values.map((o) => o.label).join(' / ') || null
+            : null,
+          barcode: v.upc || v.gtin || null,
+          unit_cost: Number(v.cost_price ?? p.cost_price ?? 0),
+          retail_price: Number(v.price ?? p.price ?? 0),
+          last_synced_at: now,
+        })
       }
     }
 
-    if (list.length < 100) break
+    if (variantRows.length) {
+      const { error: vErr } = await sb
+        .from('variants')
+        .upsert(variantRows, { onConflict: 'org_id,external_source,external_id' })
+      if (vErr) problems.push(`Variants: ${vErr.message}`)
+      else variants += variantRows.length
+    }
+
+    if (list.length < 250) break
     page += 1
   }
 
-  // Write stock in batches.
-  for (let i = 0; i < stock.length; i += 200) {
-    const batch = stock.slice(i, i + 200)
-    const { error: sErr } = await sb
-      .from('inventory_levels')
-      .upsert(batch, { onConflict: 'variant_id,location_id' })
-    if (sErr) {
-      if (problems.length < 3) problems.push(`Stock: ${sErr.message}`)
-      break
-    }
-    stockRows += batch.length
-  }
+  const stock = await syncBigCommerceInventory(sb, orgId, creds, problems)
 
   return {
     products,
     variants,
-    stockRows,
-    stockLocationMissing: stockLocations.length === 0,
+    ...stock,
     error: problems.length ? problems[0] : null,
   }
+}
+
+// ---------------------------------------------------------------------------
+// Stock. On stores using multi location inventory the catalogue does not carry
+// usable levels, so read the Inventory API and map each platform location to
+// the IMS location that names BigCommerce as its stock source.
+// ---------------------------------------------------------------------------
+async function syncBigCommerceInventory(sb, orgId, creds, problems) {
+  const { data: locs, error: locErr } = await sb
+    .from('locations')
+    .select('id, name, external_refs, stock_source')
+    .eq('org_id', orgId)
+    .eq('stock_source', 'bigcommerce')
+
+  if (locErr) {
+    problems.push(`Locations: ${locErr.message}`)
+    return { stockRows: 0, stockLocationMissing: true }
+  }
+  if (!locs || locs.length === 0) {
+    return { stockRows: 0, stockLocationMissing: true }
+  }
+
+  // BigCommerce location id -> our location id
+  const locationByExternal = {}
+  for (const l of locs) {
+    const ref = l.external_refs?.bigcommerce
+    if (ref) locationByExternal[String(ref)] = l.id
+  }
+  const unmapped = locs.filter((l) => !l.external_refs?.bigcommerce).map((l) => l.name)
+  if (unmapped.length) {
+    problems.push(
+      `These locations have no BigCommerce location chosen: ${unmapped.join(', ')}`
+    )
+  }
+  if (Object.keys(locationByExternal).length === 0) {
+    return { stockRows: 0, stockLocationMissing: true }
+  }
+
+  // Look variants up by the platform's own id.
+  const variantIdByExternal = {}
+  let from = 0
+  while (from < 20000) {
+    const { data: vs, error: vErr } = await sb
+      .from('variants')
+      .select('id, external_id')
+      .eq('org_id', orgId)
+      .eq('external_source', 'bigcommerce')
+      .range(from, from + 999)
+    if (vErr) { problems.push(`Variants lookup: ${vErr.message}`); break }
+    for (const v of vs ?? []) variantIdByExternal[v.external_id] = v.id
+    if (!vs || vs.length < 1000) break
+    from += 1000
+  }
+
+  const locationFilter = Object.keys(locationByExternal).join(',')
+  const rows = []
+  let page = 1
+
+  while (page <= 20) {
+    let body
+    try {
+      body = await bcFetch(
+        creds,
+        `/v3/inventory/items?limit=1000&page=${page}&location_id:in=${locationFilter}`
+      )
+    } catch (err) {
+      problems.push(`Inventory: ${err.message}`)
+      break
+    }
+
+    const items = body?.data ?? []
+    if (items.length === 0) break
+
+    for (const item of items) {
+      const identity = item.identity ?? {}
+      const externalVariant = identity.variant_id != null
+        ? String(identity.variant_id)
+        : `${identity.product_id}-base`
+
+      const variantId = variantIdByExternal[externalVariant]
+      const locationId = locationByExternal[String(item.location_id)]
+      if (!variantId || !locationId) continue
+
+      rows.push({
+        org_id: orgId,
+        variant_id: variantId,
+        location_id: locationId,
+        on_hand: Number(item.total_inventory_onhand ?? item.available_to_sell ?? 0),
+        updated_at: new Date().toISOString(),
+      })
+    }
+
+    if (items.length < 1000) break
+    page += 1
+  }
+
+  let stockRows = 0
+  for (let i = 0; i < rows.length; i += 500) {
+    const batch = rows.slice(i, i + 500)
+    const { error: sErr } = await sb
+      .from('inventory_levels')
+      .upsert(batch, { onConflict: 'variant_id,location_id' })
+    if (sErr) { problems.push(`Stock: ${sErr.message}`); break }
+    stockRows += batch.length
+  }
+
+  return { stockRows, stockLocationMissing: false }
 }
 
 export default async function handler(req, res) {
