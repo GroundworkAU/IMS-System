@@ -81,9 +81,15 @@ export default function Products() {
       }
 
       let bit = `${label}: ${res.products} products, ${res.variants} variants`
-      if (res.stockRows) bit += `, stock on ${res.stockRows} lines`
-      else if (res.stockLocationMissing) {
-        bit += ` ~ no location is set to take stock from ${label}`
+      if (res.stockRows) {
+        bit += `, stock on ${res.stockRows} lines`
+      } else if (res.stockLocationMissing) {
+        bit += ` ~ no location has "Stock figures come from" set to ${label}`
+      } else if (res.invFetched === 0) {
+        bit += ` ~ ${label} returned no stock records`
+      } else if (res.invMatched === 0) {
+        bit += ` ~ ${res.invFetched} stock records came back but none matched your ` +
+               `${res.mappedLocations} mapped location(s), so the location ids do not line up`
       } else {
         bit += ', no stock figures returned'
       }

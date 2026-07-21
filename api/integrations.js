@@ -653,6 +653,8 @@ async function syncLightspeedProducts(sb, orgId, variant, creds) {
 
   let products = 0
   let variants = 0
+  let invFetched = 0      // records returned by the platform
+  let invMatched = 0      // records we could tie to a variant and a location
   const stockRows = []
 
   if (variant === 'xseries') {
@@ -753,10 +755,12 @@ async function syncLightspeedProducts(sb, orgId, variant, creds) {
         const list = body?.data ?? []
         if (list.length === 0) break
 
+        invFetched += list.length
         for (const row of list) {
           const variantId = variantIdByExternal[String(row.product_id)]
           const locationId = locationByExternal[String(row.outlet_id)]
           if (!variantId || !locationId) continue
+          invMatched += 1
           stockRows.push({
             org_id: orgId,
             variant_id: variantId,
@@ -838,10 +842,12 @@ async function syncLightspeedProducts(sb, orgId, variant, creds) {
           for (const it of list) {
             const shops = it.ItemShops?.ItemShop
             const shopList = Array.isArray(shops) ? shops : shops ? [shops] : []
+            invFetched += shopList.length
             for (const shop of shopList) {
               const variantId = variantIdByExternal[String(it.itemID)]
               const locationId = locationByExternal[String(shop.shopID)]
               if (!variantId || !locationId) continue
+              invMatched += 1
               stockRows.push({
                 org_id: orgId,
                 variant_id: variantId,
@@ -873,6 +879,9 @@ async function syncLightspeedProducts(sb, orgId, variant, creds) {
     products,
     variants,
     stockRows: written,
+    invFetched,
+    invMatched,
+    mappedLocations: Object.keys(locationByExternal).length,
     stockLocationMissing: Object.keys(locationByExternal).length === 0,
     error: problems.length ? problems[0] : null,
   }
