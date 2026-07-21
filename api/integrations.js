@@ -408,14 +408,15 @@ async function syncBigCommerceProducts(sb, orgId, creds) {
     problems.push(`Could not read brands: ${err.message}`)
   }
 
-  // Stock is held per location. Find the IMS location mapped to BigCommerce so
-  // synced levels land somewhere meaningful.
-  const { data: locs } = await sb
+  // Stock lands at whichever locations say BigCommerce is their stock source.
+  const { data: locs, error: locErr } = await sb
     .from('locations')
-    .select('id, external_refs')
+    .select('id, name, stock_source')
     .eq('org_id', orgId)
+    .eq('stock_source', 'bigcommerce')
 
-  const bcLocation = (locs ?? []).find((l) => l.external_refs?.bigcommerce)?.id ?? null
+  if (locErr) problems.push(`Could not read locations: ${locErr.message}`)
+  const stockLocations = (locs ?? []).map((l) => l.id)
 
   let page = 1
   let products = 0
@@ -488,7 +489,7 @@ async function syncBigCommerceProducts(sb, orgId, creds) {
       } else {
         variants += rows.length
 
-        if (bcLocation) {
+        for (const locationId of stockLocations) {
           for (const v of vs) {
             const saved = (savedVariants ?? []).find((x) => x.external_id === String(v.id))
             if (!saved) continue
@@ -497,7 +498,7 @@ async function syncBigCommerceProducts(sb, orgId, creds) {
             stock.push({
               org_id: orgId,
               variant_id: saved.id,
-              location_id: bcLocation,
+              location_id: locationId,
               on_hand: Number(level) || 0,
               updated_at: now,
             })
@@ -527,7 +528,7 @@ async function syncBigCommerceProducts(sb, orgId, creds) {
     products,
     variants,
     stockRows,
-    stockLocationMissing: !bcLocation,
+    stockLocationMissing: stockLocations.length === 0,
     error: problems.length ? problems[0] : null,
   }
 }

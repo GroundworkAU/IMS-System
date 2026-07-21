@@ -6,7 +6,7 @@ import { platformInfo } from '../lib/platforms'
 import { fetchPlatformLocations } from '../lib/integrations'
 import { Link } from 'react-router-dom'
 
-const EMPTY = { name: '', type: 'physical', external_refs: {}, address: '', is_active: true }
+const EMPTY = { name: '', type: 'physical', external_refs: {}, address: '', stock_source: '', is_active: true }
 
 const TYPES = [
   { value: 'physical', label: 'Physical store' },
@@ -30,7 +30,7 @@ export default function Locations() {
     setLoading(true)
     const [l, i] = await Promise.all([
       supabase.from('locations')
-        .select('id, name, type, external_refs, address, is_active')
+        .select('id, name, type, external_refs, address, stock_source, is_active')
         .order('name'),
       supabase.from('integration_settings').select('provider, status'),
     ])
@@ -84,6 +84,7 @@ export default function Locations() {
       name: values.name.trim(),
       type: values.type,
       external_refs: refs,
+      stock_source: values.stock_source || null,
       address: values.type === 'online' ? null : (values.address.trim() || null),
       is_active: values.is_active,
     }
@@ -160,7 +161,7 @@ export default function Locations() {
               <thead>
                 <tr>
                   <th>Location</th><th>Type</th><th>Linked to</th>
-                  <th>Status</th><th></th>
+                  <th>Stock from</th><th>Status</th><th></th>
                 </tr>
               </thead>
               <tbody>
@@ -187,6 +188,11 @@ export default function Locations() {
                       ) : (
                         <span className="cell-sub">Not linked</span>
                       )}
+                    </td>
+                    <td>
+                      {l.stock_source
+                        ? <span className="pill">{platformInfo(l.stock_source).label}</span>
+                        : <span className="cell-sub">Manual</span>}
                     </td>
                     <td>{l.is_active ? 'Active' : 'Inactive'}</td>
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
@@ -332,6 +338,30 @@ function LocationModal({ initial, id, orgPlatforms, remote, busy, onClose, onSav
           Tell us which systems you use in <Link className="linklike" to="/settings">Settings</Link>{' '}
           and you'll be able to link this location to them.
         </p>
+      )}
+
+      {orgPlatforms.length > 0 && (
+        <div className="field">
+          <label htmlFor="l-stock">Stock figures come from</label>
+          <select
+            id="l-stock"
+            className="input"
+            value={v.stock_source ?? ''}
+            onChange={set('stock_source')}
+          >
+            <option value="">Not synced ~ managed by hand</option>
+            {orgPlatforms
+              .filter((k) => k !== 'other')
+              .map((k) => (
+                <option key={k} value={k}>{platformInfo(k).label}</option>
+              ))}
+          </select>
+          <p className="field-hint">
+            Which system reports the stock held here. If your online stock is really held in
+            your point of sale and only mirrored to the web store, pick the point of sale ~ it
+            is the one that knows the truth.
+          </p>
+        </div>
       )}
 
       <div className="field" style={{ marginBottom: 0 }}>
