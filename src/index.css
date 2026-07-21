@@ -708,3 +708,17 @@ a.btn { display: inline-block; text-decoration: none; }
 
 /* product-head is a div now, so give it the button affordances */
 .product-head { min-height: 64px; }
+
+/* ---------- Location chips and per location stock ---------- */
+.loc-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.loc-chip {
+  border: 1px solid var(--blush); background: var(--surface); color: var(--muted);
+  border-radius: 20px; padding: 4px 12px; font-size: 12px; font-weight: 600;
+  font-family: inherit;
+}
+.loc-chip.on { background: var(--deep-brown); border-color: var(--deep-brown); color: var(--cream); }
+
+.stock-at { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.stock-at strong { color: var(--dark-brown); }
+.stock-at.destination { color: var(--deep-brown); }
+.stock-at.destination strong { color: var(--deep-brown); }

@@ -22,6 +22,8 @@ export default function Products() {
   const [syncing, setSyncing] = useState(false)
   const [status, setStatus] = useState(null)
   const [expanded, setExpanded] = useState(new Set())
+  const [locations, setLocations] = useState([])
+  const [visibleLocations, setVisibleLocations] = useState(null)   // null = all
   const [total, setTotal] = useState(0)
 
   const syncable = (org?.platforms ?? []).filter((p) => p === 'bigcommerce' || p === 'lightspeed')
@@ -48,6 +50,15 @@ export default function Products() {
   }, [query, brand, sort])
 
   useEffect(() => { load({}) }, [])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    supabase
+      .from('locations')
+      .select('id, name')
+      .eq('is_active', true)
+      .order('name')
+      .then(({ data }) => setLocations(data ?? []))
+  }, [])
 
   // Brand list for the filter
   useEffect(() => {
@@ -174,6 +185,32 @@ export default function Products() {
               <option value="recently_synced">Most recently synced</option>
             </select>
           </div>
+          {locations.length > 1 && (
+            <div className="filter-field" style={{ flex: '1 1 100%' }}>
+              <label>Show stock at</label>
+              <div className="loc-chips">
+                {locations.map((l) => {
+                  const on = !visibleLocations || visibleLocations.includes(l.id)
+                  return (
+                    <button
+                      key={l.id}
+                      className={'loc-chip' + (on ? ' on' : '')}
+                      onClick={() => {
+                        const current = visibleLocations ?? locations.map((x) => x.id)
+                        const next = current.includes(l.id)
+                          ? current.filter((x) => x !== l.id)
+                          : [...current, l.id]
+                        setVisibleLocations(next.length === locations.length ? null : next)
+                      }}
+                    >
+                      {l.name}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           <div className="filter-actions">
             <button className="btn" onClick={() => load({})}>Apply</button>
             {(query || brand || sort !== 'name') && (
@@ -205,8 +242,13 @@ export default function Products() {
           <div className="product-list">
             {products.map((p) => {
               const isOpen = expanded.has(p.id)
+              const shown = visibleLocations ?? locations.map((l) => l.id)
               const stock = (p.variants ?? []).reduce(
-                (sum, v) => sum + (v.inventory_levels ?? []).reduce((s, i) => s + (i.on_hand || 0), 0),
+                (sum, v) =>
+                  sum +
+                  (v.inventory_levels ?? [])
+                    .filter((i) => shown.includes(i.location_id))
+                    .reduce((s, i) => s + (i.on_hand || 0), 0),
                 0
               )
               const prices = (p.variants ?? []).map((v) => Number(v.retail_price || 0))
@@ -248,7 +290,12 @@ export default function Products() {
                         <tbody>
                           {(p.variants ?? []).map((v) => {
                             const levels = v.inventory_levels ?? []
-                            const totalStock = levels.reduce((s, i) => s + (i.on_hand || 0), 0)
+                            const rows = locations
+                              .filter((l) => shown.includes(l.id))
+                              .map((l) => {
+                                const found = levels.find((i) => i.location_id === l.id)
+                                return { id: l.id, name: l.name, qty: found ? found.on_hand : 0 }
+                              })
                             return (
                               <tr key={v.id}>
                                 <td className="cell-strong">{v.option_name || 'Single'}</td>
@@ -258,22 +305,24 @@ export default function Products() {
                                 </td>
                                 <td>{money(v.retail_price)}</td>
                                 <td>
-                                  {levels.length === 0 ? (
-                                    <span className="cell-sub">Not tracked yet</span>
+                                  {rows.length === 0 ? (
+                                    <span className="cell-sub">No locations set up</span>
                                   ) : (
                                     <div className="stock-lines">
-                                      {levels.map((l) => (
-                                        <div key={l.location_id} className="stock-line">
-                                          <span className="cell-sub">{l.locations?.name || 'Location'}</span>
-                                          <span className={l.on_hand > 0 ? 'stock-num' : 'stock-num zero'}>
-                                            {l.on_hand}
+                                      {rows.map((r) => (
+                                        <div key={r.id} className="stock-line">
+                                          <span className="cell-sub">{r.name}</span>
+                                          <span className={r.qty > 0 ? 'stock-num' : 'stock-num zero'}>
+                                            {r.qty}
                                           </span>
                                         </div>
                                       ))}
-                                      {levels.length > 1 && (
+                                      {rows.length > 1 && (
                                         <div className="stock-line stock-total">
                                           <span className="cell-sub">Total</span>
-                                          <span className="stock-num">{totalStock}</span>
+                                          <span className="stock-num">
+                                            {rows.reduce((s, r) => s + r.qty, 0)}
+                                          </span>
                                         </div>
                                       )}
                                     </div>

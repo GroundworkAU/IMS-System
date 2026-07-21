@@ -14,6 +14,7 @@ export default function CatalogueBrowser({ selected, onChange, destinationId, fu
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [expanded, setExpanded] = useState(new Set())
+  const [locations, setLocations] = useState([])
 
   const load = useCallback(async (search, brandVal) => {
     setLoading(true)
@@ -28,6 +29,16 @@ export default function CatalogueBrowser({ selected, onChange, destinationId, fu
   }, [])
 
   useEffect(() => { load('', '') }, [load])
+
+  // Every active location, so stock can show a zero rather than nothing at all.
+  useEffect(() => {
+    supabase
+      .from('locations')
+      .select('id, name')
+      .eq('is_active', true)
+      .order('name')
+      .then(({ data }) => setLocations(data ?? []))
+  }, [])
 
   useEffect(() => {
     supabase
@@ -64,16 +75,18 @@ export default function CatalogueBrowser({ selected, onChange, destinationId, fu
     onChange(next)
   }
 
-  // Stock at the location the request is for, versus everywhere else.
-  function stockSplit(variant) {
+  // Stock for every active location, defaulting to zero where nothing is held.
+  function stockByLocation(variant) {
     const levels = variant.inventory_levels ?? []
-    let here = null
-    const elsewhere = []
-    for (const l of levels) {
-      if (destinationId && l.location_id === destinationId) here = l.on_hand
-      else elsewhere.push({ name: l.locations?.name || 'Location', qty: l.on_hand })
-    }
-    return { here, elsewhere }
+    return locations.map((loc) => {
+      const found = levels.find((l) => l.location_id === loc.id)
+      return {
+        id: loc.id,
+        name: loc.name,
+        qty: found ? found.on_hand : 0,
+        isDestination: destinationId === loc.id,
+      }
+    })
   }
 
   return (
@@ -166,18 +179,18 @@ export default function CatalogueBrowser({ selected, onChange, destinationId, fu
                           </span>
 
                           <span className="browse-stock">
-                            {destinationId && (
-                              <span className="cell-sub">
-                                Here: <strong>{here ?? 0}</strong>
-                              </span>
-                            )}
-                            {elsewhere.map((e) => (
-                              <span key={e.name} className="cell-sub">
-                                {e.name}: <strong>{e.qty}</strong>
-                              </span>
-                            ))}
-                            {elsewhere.length === 0 && !destinationId && (
-                              <span className="cell-sub">No stock recorded</span>
+                            {levels.length === 0 ? (
+                              <span className="cell-sub">No locations set up</span>
+                            ) : (
+                              levels.map((l) => (
+                                <span
+                                  key={l.id}
+                                  className={'stock-at' + (l.isDestination ? ' destination' : '')}
+                                  title={l.isDestination ? 'Where the stock is needed' : undefined}
+                                >
+                                  {l.name}: <strong>{l.qty}</strong>
+                                </span>
+                              ))
                             )}
                           </span>
 
