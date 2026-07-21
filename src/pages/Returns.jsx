@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import { loadOrderLines, syncOrders } from '../lib/integrations'
+import { loadOrderLines, syncOrders, checkRefunds as checkRefundsApi } from '../lib/integrations'
 import Modal from '../components/Modal'
 
 const DEFAULT_REASONS = [
@@ -118,19 +118,28 @@ export default function Returns() {
     else load()
   }
 
-  // Re-syncs orders, which also picks up any refunds processed on the platform.
+  // Asks the platform directly whether each open return has been refunded.
   async function checkRefunds() {
     setChecking(true)
     setStatus(null)
-    const res = await syncOrders('bigcommerce')
+    const res = await checkRefundsApi('bigcommerce')
     setChecking(false)
-    if (!res.ok) return setStatus({ type: 'err', text: res.error || 'Could not check.' })
-    setStatus({
-      type: 'ok',
-      text: res.autoClosed > 0
-        ? `${res.autoClosed} return${res.autoClosed === 1 ? '' : 's'} marked as refunded.`
-        : 'Checked. No new refunds found.',
-    })
+
+    if (res.error) {
+      setStatus({ type: 'err', text: `Could not check: ${res.error}` })
+    } else if (res.checked === 0) {
+      setStatus({ type: 'ok', text: 'No open returns to check.' })
+    } else if (res.closed > 0) {
+      setStatus({
+        type: 'ok',
+        text: `Checked ${res.checked} open return${res.checked === 1 ? '' : 's'}, marked ${res.closed} as refunded.`,
+      })
+    } else {
+      setStatus({
+        type: 'ok',
+        text: `Checked ${res.checked} open return${res.checked === 1 ? '' : 's'}. No refunds found yet.`,
+      })
+    }
     load()
   }
 

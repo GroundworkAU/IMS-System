@@ -96,3 +96,8 @@ export async function syncOrders(provider = 'bigcommerce') {
 export async function loadOrderLines(orderId, provider = 'bigcommerce') {
   return callIntegrations({ action: 'order_lines', provider, order_id: orderId })
 }
+
+// Ask the platform whether any open return has now been refunded.
+export async function checkRefunds(provider = 'bigcommerce') {
+  return callIntegrations({ action: 'check_refunds', provider })
+}

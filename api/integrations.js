@@ -261,17 +261,19 @@ async function syncBigCommerceOrders(sb, orgId, creds, sinceDays = 120) {
   // Any open return whose order now shows as refunded on the platform gets
   // marked refunded automatically, so the list reflects reality without anyone
   // having to remember to update it.
-  const { data: refundedOrders } = await sb
+  const { data: refundedOrders, error: refErr } = await sb
     .from('orders')
     .select('id')
     .eq('org_id', orgId)
-    .in('status', ['Refunded', 'Partially Refunded'])
+    .ilike('status', '%refunded%')
+
+  if (refErr) problems.push(`Could not check refunds: ${refErr.message}`)
 
   const refundedIds = (refundedOrders ?? []).map((o) => o.id)
   let autoClosed = 0
 
   if (refundedIds.length > 0) {
-    const { data: updated } = await sb
+    const { data: updated, error: updErr } = await sb
       .from('returns')
       .update({
         status: 'refunded',
@@ -282,7 +284,9 @@ async function syncBigCommerceOrders(sb, orgId, creds, sinceDays = 120) {
       .eq('status', 'open')
       .in('order_id', refundedIds)
       .select('id')
-    autoClosed = updated?.length ?? 0
+
+    if (updErr) problems.push(`Could not mark returns refunded: ${updErr.message}`)
+    else autoClosed = updated?.length ?? 0
   }
 
   return {
@@ -322,6 +326,64 @@ async function loadBigCommerceOrderLines(sb, orgId, creds, orderId) {
   const { data: inserted, error } = await sb.from('order_lines').insert(rows).select('*')
   if (error) throw new Error(error.message)
   return inserted
+}
+
+// ---------------------------------------------------------------------------
+// Refund detection. Rather than trusting the order status (which does not
+// always change when a refund is issued), ask BigCommerce directly whether any
+// refund exists against the order. Only open returns are checked, so this stays
+// to a handful of calls.
+// ---------------------------------------------------------------------------
+async function checkRefundsForOpenReturns(sb, orgId, creds) {
+  const { data: open, error } = await sb
+    .from('returns')
+    .select('id, order_id, orders(external_order_id, status)')
+    .eq('org_id', orgId)
+    .eq('status', 'open')
+
+  if (error) throw new Error(`Could not read returns: ${error.message}`)
+
+  let checked = 0
+  let closed = 0
+  const problems = []
+
+  for (const r of open ?? []) {
+    const extId = r.orders?.external_order_id
+    if (!extId) continue
+    checked += 1
+
+    let refunded = String(r.orders?.status || '').toLowerCase().includes('refunded')
+
+    if (!refunded) {
+      try {
+        const body = await bcFetch(creds, `/v3/orders/${extId}/payment_actions/refunds`)
+        const list = Array.isArray(body) ? body : (body?.data ?? [])
+        refunded = list.length > 0
+      } catch (err) {
+        if (problems.length < 3) problems.push(err.message)
+        continue
+      }
+    }
+
+    if (refunded) {
+      const { error: uErr } = await sb
+        .from('returns')
+        .update({
+          status: 'refunded',
+          refunded_at: new Date().toISOString(),
+          refund_source: 'platform',
+        })
+        .eq('id', r.id)
+
+      if (uErr) {
+        if (problems.length < 3) problems.push(`Could not update return: ${uErr.message}`)
+      } else {
+        closed += 1
+      }
+    }
+  }
+
+  return { checked, closed, error: problems.length ? problems[0] : null }
 }
 
 export default async function handler(req, res) {
@@ -458,7 +520,7 @@ export default async function handler(req, res) {
     }
 
     // --- sync orders from the platform -------------------------------------
-    if (action === 'sync_orders' || action === 'order_lines') {
+    if (action === 'sync_orders' || action === 'order_lines' || action === 'check_refunds') {
       const { data: secret } = await sb
         .from('integration_secrets')
         .select('credentials')
@@ -471,6 +533,10 @@ export default async function handler(req, res) {
       }
 
       try {
+        if (action === 'check_refunds') {
+          const out = await checkRefundsForOpenReturns(sb, orgId, secret.credentials)
+          return res.status(200).json({ ok: !out.error, ...out })
+        }
         if (action === 'sync_orders') {
           const out = await syncBigCommerceOrders(sb, orgId, secret.credentials)
           return res.status(200).json({ ok: true, ...out })
