@@ -607,6 +607,295 @@ async function syncBigCommerceInventory(sb, orgId, creds, problems) {
   return { stockRows, stockLocationMissing: false }
 }
 
+// ---------------------------------------------------------------------------
+// Lightspeed. Two very different products share the name, so everything here
+// dispatches on the variant chosen when the connection was made.
+// ---------------------------------------------------------------------------
+function lsBase(variant, creds) {
+  if (variant === 'xseries') {
+    const domain = (creds.domain_prefix || '').replace(/\.retail\.lightspeed\.app$/, '')
+    return `https://${domain}.retail.lightspeed.app`
+  }
+  return `https://api.lightspeedapp.com/API/V3/Account/${creds.account_id}`
+}
+
+async function lsFetch(variant, creds, path) {
+  const res = await fetch(`${lsBase(variant, creds)}${path}`, {
+    headers: {
+      Authorization: `Bearer ${creds.access_token}`,
+      Accept: 'application/json',
+    },
+  })
+  if (res.status === 204) return null
+  if (!res.ok) throw new Error(`Lightspeed replied ${res.status} on ${path}`)
+  return res.json()
+}
+
+async function syncLightspeedProducts(sb, orgId, variant, creds) {
+  const problems = []
+  const now = new Date().toISOString()
+
+  // Locations that take their stock from Lightspeed, keyed by the outlet/shop
+  // id recorded against them.
+  const { data: locs, error: locErr } = await sb
+    .from('locations')
+    .select('id, name, external_refs, stock_source')
+    .eq('org_id', orgId)
+    .eq('stock_source', 'lightspeed')
+
+  if (locErr) problems.push(`Locations: ${locErr.message}`)
+
+  const locationByExternal = {}
+  for (const l of locs ?? []) {
+    const ref = l.external_refs?.lightspeed
+    if (ref) locationByExternal[String(ref)] = l.id
+  }
+
+  let products = 0
+  let variants = 0
+  const stockRows = []
+
+  if (variant === 'xseries') {
+    // X-Series: each product row is effectively a sellable SKU. Products that
+    // belong to a family share variant_parent_id.
+    let after = 0
+    let guard = 0
+    const productIdByExternal = {}
+
+    while (guard < 20) {
+      guard += 1
+      const body = await lsFetch(
+        variant, creds,
+        `/api/2.0/products?page_size=500&after=${after}&deleted=false`
+      )
+      const list = body?.data ?? []
+      if (list.length === 0) break
+
+      // Parent products first, so variants can hang off them.
+      const parents = {}
+      for (const p of list) {
+        const parentId = p.variant_parent_id || p.id
+        if (!parents[parentId]) {
+          parents[parentId] = {
+            org_id: orgId,
+            external_source: 'lightspeed',
+            external_id: String(parentId),
+            name: p.variant_parent_id ? (p.name || '').split(' / ')[0] : (p.name || 'Product'),
+            external_brand: p.brand_name || null,
+            image_url: p.image_thumbnail_url || null,
+            status: 'active',
+            last_synced_at: now,
+          }
+        }
+      }
+
+      const { data: savedProducts, error: pErr } = await sb
+        .from('products')
+        .upsert(Object.values(parents), { onConflict: 'org_id,external_source,external_id' })
+        .select('id, external_id')
+
+      if (pErr) { problems.push(`Products: ${pErr.message}`); break }
+      for (const row of savedProducts ?? []) productIdByExternal[row.external_id] = row.id
+      products += savedProducts?.length ?? 0
+
+      const variantRows = []
+      for (const p of list) {
+        const parentId = String(p.variant_parent_id || p.id)
+        const productId = productIdByExternal[parentId]
+        if (!productId) continue
+
+        variantRows.push({
+          org_id: orgId,
+          product_id: productId,
+          external_source: 'lightspeed',
+          external_id: String(p.id),
+          sku: p.sku || null,
+          option_name: Array.isArray(p.variant_options) && p.variant_options.length
+            ? p.variant_options.map((o) => o.value).join(' / ')
+            : null,
+          barcode: p.barcode || null,
+          unit_cost: Number(p.supply_price ?? 0),
+          retail_price: Number(p.price_including_tax ?? p.price ?? 0),
+          last_synced_at: now,
+        })
+      }
+
+      if (variantRows.length) {
+        const { error: vErr } = await sb
+          .from('variants')
+          .upsert(variantRows, { onConflict: 'org_id,external_source,external_id' })
+        if (vErr) problems.push(`Variants: ${vErr.message}`)
+        else variants += variantRows.length
+      }
+
+      const maxVersion = list.reduce(
+        (m, p) => Math.max(m, Number(p.version ?? 0)), after
+      )
+      if (maxVersion === after || list.length < 500) break
+      after = maxVersion
+    }
+
+    // Stock, if any location points at Lightspeed.
+    if (Object.keys(locationByExternal).length > 0) {
+      const variantIdByExternal = await loadVariantMap(sb, orgId, 'lightspeed', problems)
+      let invAfter = 0
+      let invGuard = 0
+
+      while (invGuard < 20) {
+        invGuard += 1
+        let body
+        try {
+          body = await lsFetch(
+            variant, creds, `/api/2.0/inventory?page_size=500&after=${invAfter}`
+          )
+        } catch (err) { problems.push(`Inventory: ${err.message}`); break }
+
+        const list = body?.data ?? []
+        if (list.length === 0) break
+
+        for (const row of list) {
+          const variantId = variantIdByExternal[String(row.product_id)]
+          const locationId = locationByExternal[String(row.outlet_id)]
+          if (!variantId || !locationId) continue
+          stockRows.push({
+            org_id: orgId,
+            variant_id: variantId,
+            location_id: locationId,
+            on_hand: Number(row.inventory_level ?? 0),
+            updated_at: now,
+          })
+        }
+
+        const maxVersion = list.reduce((m, r) => Math.max(m, Number(r.version ?? 0)), invAfter)
+        if (maxVersion === invAfter || list.length < 500) break
+        invAfter = maxVersion
+      }
+    }
+  } else {
+    // R-Series: items carry their per shop quantities with them.
+    let offset = 0
+    let guard = 0
+
+    while (guard < 40) {
+      guard += 1
+      let body
+      try {
+        body = await lsFetch(
+          variant, creds,
+          `/Item.json?limit=100&offset=${offset}&load_relations=${encodeURIComponent('["ItemShops"]')}`
+        )
+      } catch (err) { problems.push(err.message); break }
+
+      const raw = body?.Item
+      const list = Array.isArray(raw) ? raw : raw ? [raw] : []
+      if (list.length === 0) break
+
+      const productRows = list.map((it) => ({
+        org_id: orgId,
+        external_source: 'lightspeed',
+        external_id: String(it.itemID),
+        name: it.description || 'Product',
+        external_brand: null,
+        status: 'active',
+        last_synced_at: now,
+      }))
+
+      const { data: savedProducts, error: pErr } = await sb
+        .from('products')
+        .upsert(productRows, { onConflict: 'org_id,external_source,external_id' })
+        .select('id, external_id')
+
+      if (pErr) { problems.push(`Products: ${pErr.message}`); break }
+      products += savedProducts?.length ?? 0
+
+      const productIdByExternal = {}
+      for (const row of savedProducts ?? []) productIdByExternal[row.external_id] = row.id
+
+      const variantRows = list.map((it) => ({
+        org_id: orgId,
+        product_id: productIdByExternal[String(it.itemID)],
+        external_source: 'lightspeed',
+        external_id: String(it.itemID),
+        sku: it.customSku || it.systemSku || null,
+        option_name: null,
+        barcode: it.upc || it.ean || null,
+        unit_cost: Number(it.defaultCost ?? 0),
+        retail_price: Number(it.Prices?.ItemPrice?.[0]?.amount ?? 0),
+        last_synced_at: now,
+      })).filter((v) => v.product_id)
+
+      if (variantRows.length) {
+        const { data: savedVariants, error: vErr } = await sb
+          .from('variants')
+          .upsert(variantRows, { onConflict: 'org_id,external_source,external_id' })
+          .select('id, external_id')
+        if (vErr) problems.push(`Variants: ${vErr.message}`)
+        else {
+          variants += variantRows.length
+          const variantIdByExternal = {}
+          for (const row of savedVariants ?? []) variantIdByExternal[row.external_id] = row.id
+
+          for (const it of list) {
+            const shops = it.ItemShops?.ItemShop
+            const shopList = Array.isArray(shops) ? shops : shops ? [shops] : []
+            for (const shop of shopList) {
+              const variantId = variantIdByExternal[String(it.itemID)]
+              const locationId = locationByExternal[String(shop.shopID)]
+              if (!variantId || !locationId) continue
+              stockRows.push({
+                org_id: orgId,
+                variant_id: variantId,
+                location_id: locationId,
+                on_hand: Number(shop.qoh ?? 0),
+                updated_at: now,
+              })
+            }
+          }
+        }
+      }
+
+      if (list.length < 100) break
+      offset += 100
+    }
+  }
+
+  let written = 0
+  for (let i = 0; i < stockRows.length; i += 500) {
+    const batch = stockRows.slice(i, i + 500)
+    const { error: sErr } = await sb
+      .from('inventory_levels')
+      .upsert(batch, { onConflict: 'variant_id,location_id' })
+    if (sErr) { problems.push(`Stock: ${sErr.message}`); break }
+    written += batch.length
+  }
+
+  return {
+    products,
+    variants,
+    stockRows: written,
+    stockLocationMissing: Object.keys(locationByExternal).length === 0,
+    error: problems.length ? problems[0] : null,
+  }
+}
+
+async function loadVariantMap(sb, orgId, source, problems) {
+  const map = {}
+  let from = 0
+  while (from < 20000) {
+    const { data, error } = await sb
+      .from('variants')
+      .select('id, external_id')
+      .eq('org_id', orgId)
+      .eq('external_source', source)
+      .range(from, from + 999)
+    if (error) { problems.push(`Variants lookup: ${error.message}`); break }
+    for (const v of data ?? []) map[v.external_id] = v.id
+    if (!data || data.length < 1000) break
+    from += 1000
+  }
+  return map
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
@@ -752,12 +1041,23 @@ export default async function handler(req, res) {
         .maybeSingle()
 
       if (!secret) return res.status(400).json({ error: 'Not connected yet.' })
-      if (provider !== 'bigcommerce') {
+      if (provider !== 'bigcommerce' && action !== 'sync_products') {
         return res.status(400).json({ error: 'Order sync currently supports BigCommerce.' })
       }
 
       try {
         if (action === 'sync_products') {
+          if (provider === 'lightspeed') {
+            const { data: setting } = await sb
+              .from('integration_settings')
+              .select('variant')
+              .match({ org_id: orgId, provider })
+              .maybeSingle()
+            const out = await syncLightspeedProducts(
+              sb, orgId, setting?.variant ?? 'xseries', secret.credentials
+            )
+            return res.status(200).json({ ok: !out.error, ...out })
+          }
           const out = await syncBigCommerceProducts(sb, orgId, secret.credentials)
           return res.status(200).json({ ok: !out.error, ...out })
         }

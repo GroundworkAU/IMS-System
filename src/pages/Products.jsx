@@ -24,7 +24,8 @@ export default function Products() {
   const [expanded, setExpanded] = useState(new Set())
   const [total, setTotal] = useState(0)
 
-  const connected = (org?.platforms ?? []).includes('bigcommerce')
+  const syncable = (org?.platforms ?? []).filter((p) => p === 'bigcommerce' || p === 'lightspeed')
+  const connected = syncable.length > 0
 
   const load = useCallback(async (opts = {}) => {
     const { search = query, brandVal = brand, sortVal = sort } = opts
@@ -60,27 +61,37 @@ export default function Products() {
       })
   }, [total])
 
+  const platformLabel = { bigcommerce: 'BigCommerce', lightspeed: 'Lightspeed' }
+
   async function handleSync() {
     setSyncing(true)
     setStatus(null)
-    const res = await syncProducts('bigcommerce')
-    setSyncing(false)
-    if (res.error) {
-      setStatus({ type: 'err', text: `Sync problem: ${res.error}` })
-    } else {
-      const bits = [`Brought in ${res.products} products and ${res.variants} variants`]
-      if (res.stockLocationMissing) {
-        bits.push(
-          'no stock was written ~ open Locations, edit the location and set ' +
-          '"Stock figures come from" to BigCommerce'
-        )
-      } else if (res.stockRows) {
-        bits.push(`stock updated on ${res.stockRows} lines`)
-      } else {
-        bits.push('no stock figures came back from the platform')
+
+    const lines = []
+    let anyError = null
+
+    for (const platform of syncable) {
+      const res = await syncProducts(platform)
+      const label = platformLabel[platform] ?? platform
+
+      if (res.error) {
+        anyError = res.error
+        lines.push(`${label}: ${res.error}`)
+        continue
       }
-      setStatus({ type: res.stockLocationMissing ? 'err' : 'ok', text: bits.join(', ') + '.' })
+
+      let bit = `${label}: ${res.products} products, ${res.variants} variants`
+      if (res.stockRows) bit += `, stock on ${res.stockRows} lines`
+      else if (res.stockLocationMissing) {
+        bit += ` ~ no location is set to take stock from ${label}`
+      } else {
+        bit += ', no stock figures returned'
+      }
+      lines.push(bit)
     }
+
+    setSyncing(false)
+    setStatus({ type: anyError ? 'err' : 'ok', text: lines.join('. ') + '.' })
     load({})
   }
 
