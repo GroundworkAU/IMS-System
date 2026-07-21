@@ -441,3 +441,5 @@ textarea.input { resize: vertical; font-family: inherit; }
 @media (max-width: 560px) {
   .detail-grid { grid-template-columns: 1fr; }
 }
+
+a.btn { display: inline-block; text-decoration: none; }

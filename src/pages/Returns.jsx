@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import { loadOrderLines } from '../lib/integrations'
+import { loadOrderLines, syncOrders } from '../lib/integrations'
 import Modal from '../components/Modal'
 
 const REASONS = [
@@ -20,7 +20,12 @@ const CONDITIONS = [
   { value: 'faulty', label: 'Faulty' },
 ]
 
-const STATUSES = ['requested', 'approved', 'received', 'refunded', 'rejected']
+const platformUrl = {
+  bigcommerce: (cfg, extId) =>
+    cfg?.store_hash ? `https://store-${cfg.store_hash}.mybigcommerce.com/manage/orders/${extId}` : null,
+  shopify: (cfg, extId) =>
+    cfg?.shop_domain ? `https://${cfg.shop_domain}/admin/orders/${extId}` : null,
+}
 
 const formatDate = (d) =>
   d ? new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'
@@ -29,6 +34,8 @@ export default function Returns() {
   const { profile } = useAuth()
   const [returns, setReturns] = useState([])
   const [locations, setLocations] = useState([])
+  const [integrations, setIntegrations] = useState([])
+  const [checking, setChecking] = useState(false)
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState(null)
   const [creating, setCreating] = useState(false)
@@ -36,25 +43,78 @@ export default function Returns() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [r, l] = await Promise.all([
+    const [r, l, i] = await Promise.all([
       supabase.from('returns')
-        .select('id, rma_number, order_number, return_date, reason, status, returned_to_location_id, locations:returned_to_location_id(name), profiles:logged_by(full_name)')
+        .select(`id, rma_number, order_number, return_date, reason, status, created_at,
+                 refunded_at, refund_source, returned_to_location_id,
+                 locations:returned_to_location_id(name),
+                 profiles:logged_by(full_name),
+                 orders(id, order_date, external_order_id,
+                        sales_channels(platform),
+                        customers(first_name, last_name, email))`)
         .order('created_at', { ascending: false })
         .limit(100),
       supabase.from('locations').select('id, name').eq('is_active', true).order('name'),
+      supabase.from('integration_settings').select('provider, config, status'),
     ])
     if (r.error) setStatus({ type: 'err', text: r.error.message })
     setReturns(r.data ?? [])
     setLocations(l.data ?? [])
+    setIntegrations(i.data ?? [])
     setLoading(false)
   }, [])
 
   useEffect(() => { load() }, [load])
 
-  async function updateStatus(id, newStatus) {
-    const { error } = await supabase.from('returns').update({ status: newStatus }).eq('id', id)
+  async function markRefunded(r) {
+    const { error } = await supabase
+      .from('returns')
+      .update({
+        status: 'refunded',
+        refunded_at: new Date().toISOString(),
+        refund_source: 'manual',
+      })
+      .eq('id', r.id)
     if (error) setStatus({ type: 'err', text: error.message })
-    else { setStatus({ type: 'ok', text: 'Return updated.' }); load() }
+    else { setStatus({ type: 'ok', text: `${r.rma_number} marked as refunded.` }); load() }
+  }
+
+  async function reopen(r) {
+    const { error } = await supabase
+      .from('returns')
+      .update({ status: 'open', refunded_at: null, refund_source: null })
+      .eq('id', r.id)
+    if (error) setStatus({ type: 'err', text: error.message })
+    else load()
+  }
+
+  // Re-syncs orders, which also picks up any refunds processed on the platform.
+  async function checkRefunds() {
+    setChecking(true)
+    setStatus(null)
+    const res = await syncOrders('bigcommerce')
+    setChecking(false)
+    if (!res.ok) return setStatus({ type: 'err', text: res.error || 'Could not check.' })
+    setStatus({
+      type: 'ok',
+      text: res.autoClosed > 0
+        ? `${res.autoClosed} return${res.autoClosed === 1 ? '' : 's'} marked as refunded.`
+        : 'Checked. No new refunds found.',
+    })
+    load()
+  }
+
+  function adminLink(r) {
+    const platform = r.orders?.sales_channels?.platform
+    const cfg = integrations.find((i) => i.provider === platform)?.config
+    const build = platformUrl[platform]
+    return build && r.orders?.external_order_id ? build(cfg, r.orders.external_order_id) : null
+  }
+
+  const customerName = (r) => {
+    const c = r.orders?.customers
+    if (!c) return '-'
+    return [c.first_name, c.last_name].filter(Boolean).join(' ') || c.email || '-'
   }
 
   return (
@@ -77,7 +137,14 @@ export default function Returns() {
       <div className="card">
         <div className="card-head">
           <h3 className="section-title" style={{ margin: 0 }}>Logged returns</h3>
-          <button className="btn btn-primary" onClick={() => setCreating(true)}>Log a return</button>
+          <div className="search-wrap">
+            <button className="btn" onClick={checkRefunds} disabled={checking}>
+              {checking ? 'Checking...' : 'Check for refunds'}
+            </button>
+            <button className="btn btn-primary" onClick={() => setCreating(true)}>
+              Log a return
+            </button>
+          </div>
         </div>
 
         {loading ? (
@@ -86,7 +153,7 @@ export default function Returns() {
           <div className="empty-state">
             <p>No returns logged yet.</p>
             <p className="page-desc">
-              Search an order, pick the items that came back, say where they went and why.
+              Search an order, pick the items that came back, say why and when.
             </p>
           </div>
         ) : (
@@ -94,34 +161,71 @@ export default function Returns() {
             <table className="table">
               <thead>
                 <tr>
-                  <th>RMA</th><th>Order</th><th>Returned to</th>
-                  <th>Date</th><th>Reason</th><th>Status</th><th></th>
+                  <th>Order</th><th>Customer</th><th>Order date</th>
+                  <th>Returned</th><th>Logged</th><th>Reason</th>
+                  <th>Logged by</th><th>Status</th><th></th>
                 </tr>
               </thead>
               <tbody>
-                {returns.map((r) => (
-                  <tr key={r.id}>
-                    <td className="cell-strong">{r.rma_number}</td>
-                    <td>{r.order_number ? `#${r.order_number}` : '-'}</td>
-                    <td>{r.locations?.name || '-'}</td>
-                    <td>{formatDate(r.return_date)}</td>
-                    <td>{r.reason || '-'}</td>
-                    <td>
-                      <select
-                        className="mini-select"
-                        value={r.status}
-                        onChange={(e) => updateStatus(r.id, e.target.value)}
-                      >
-                        {STATUSES.map((s) => (
-                          <option key={s} value={s}>{s}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      <button className="btn" onClick={() => setViewing(r)}>View</button>
-                    </td>
-                  </tr>
-                ))}
+                {returns.map((r) => {
+                  const link = adminLink(r)
+                  return (
+                    <tr key={r.id}>
+                      <td>
+                        <div className="cell-strong">
+                          {r.order_number ? `#${r.order_number}` : '-'}
+                        </div>
+                        <div className="cell-sub">{r.rma_number}</div>
+                      </td>
+                      <td>{customerName(r)}</td>
+                      <td>{formatDate(r.orders?.order_date)}</td>
+                      <td>{formatDate(r.return_date)}</td>
+                      <td>{formatDate(r.created_at)}</td>
+                      <td>{r.reason || '-'}</td>
+                      <td>{r.profiles?.full_name || '-'}</td>
+                      <td>
+                        {r.status === 'refunded' ? (
+                          <span
+                            className="status-pill ok"
+                            title={
+                              r.refund_source === 'platform'
+                                ? 'Detected automatically from the sales platform'
+                                : 'Marked by a team member'
+                            }
+                          >
+                            Refunded
+                          </span>
+                        ) : r.status === 'cancelled' ? (
+                          <span className="status-pill neutral">Cancelled</span>
+                        ) : (
+                          <span className="status-pill warn">Open</span>
+                        )}
+                      </td>
+                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        {r.status === 'open' ? (
+                          <>
+                            {link && (
+                              <a
+                                className="btn"
+                                href={link}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                Refund order
+                              </a>
+                            )}{' '}
+                            <button className="btn btn-quiet" onClick={() => markRefunded(r)}>
+                              Mark refunded
+                            </button>{' '}
+                          </>
+                        ) : (
+                          <button className="btn btn-quiet" onClick={() => reopen(r)}>Reopen</button>
+                        )}{' '}
+                        <button className="btn" onClick={() => setViewing(r)}>View</button>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -212,7 +316,7 @@ function LogReturnModal({ locations, profile, onClose, onSaved }) {
         returned_to_location_id: locationId,
         return_date: returnDate,
         reason: note.trim() ? `${reason} ~ ${note.trim()}` : reason,
-        status: 'requested',
+        status: 'open',
         logged_by: profile.id,
       })
       .select('id')
@@ -444,11 +548,18 @@ function ReturnDetailModal({ ret, onClose }) {
     <Modal title={ret.rma_number} onClose={onClose}>
       <div className="detail-grid">
         <div><span className="detail-label">Order</span>{ret.order_number ? `#${ret.order_number}` : '-'}</div>
+        <div><span className="detail-label">Order date</span>{formatDate(ret.orders?.order_date)}</div>
         <div><span className="detail-label">Returned to</span>{ret.locations?.name || '-'}</div>
-        <div><span className="detail-label">Date</span>{formatDate(ret.return_date)}</div>
+        <div><span className="detail-label">Date returned</span>{formatDate(ret.return_date)}</div>
+        <div><span className="detail-label">Logged</span>{formatDate(ret.created_at)}</div>
         <div><span className="detail-label">Logged by</span>{ret.profiles?.full_name || '-'}</div>
-        <div><span className="detail-label">Status</span>{ret.status}</div>
         <div><span className="detail-label">Reason</span>{ret.reason || '-'}</div>
+        <div>
+          <span className="detail-label">Status</span>
+          {ret.status === 'refunded'
+            ? `Refunded${ret.refund_source === 'platform' ? ' (found on platform)' : ''}`
+            : ret.status}
+        </div>
       </div>
 
       <h4 className="sub-label">Items returned</h4>

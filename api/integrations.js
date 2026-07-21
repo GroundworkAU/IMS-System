@@ -234,7 +234,34 @@ async function syncBigCommerceOrders(sb, orgId, creds, sinceDays = 120) {
     page += 1
   }
 
-  return imported
+  // Any open return whose order now shows as refunded on the platform gets
+  // marked refunded automatically, so the list reflects reality without anyone
+  // having to remember to update it.
+  const { data: refundedOrders } = await sb
+    .from('orders')
+    .select('id')
+    .eq('org_id', orgId)
+    .in('status', ['Refunded', 'Partially Refunded'])
+
+  const refundedIds = (refundedOrders ?? []).map((o) => o.id)
+  let autoClosed = 0
+
+  if (refundedIds.length > 0) {
+    const { data: updated } = await sb
+      .from('returns')
+      .update({
+        status: 'refunded',
+        refunded_at: new Date().toISOString(),
+        refund_source: 'platform',
+      })
+      .eq('org_id', orgId)
+      .eq('status', 'open')
+      .in('order_id', refundedIds)
+      .select('id')
+    autoClosed = updated?.length ?? 0
+  }
+
+  return { imported, autoClosed }
 }
 
 async function loadBigCommerceOrderLines(sb, orgId, creds, orderId) {
@@ -343,10 +370,19 @@ export default async function handler(req, res) {
 
       const result = await testConnection(provider, setting?.variant, secret.credentials)
 
+      const backfill = {}
+      if (provider === 'bigcommerce' && secret.credentials.store_hash) {
+        backfill.store_hash = secret.credentials.store_hash
+      }
+      if (provider === 'shopify' && secret.credentials.shop_domain) {
+        backfill.shop_domain = secret.credentials.shop_domain
+      }
+
       await sb.from('integration_settings').upsert(
         {
           org_id: orgId,
           provider,
+          config: backfill,
           status: result.ok ? 'connected' : 'error',
           is_active: result.ok,
           last_tested_at: new Date().toISOString(),
@@ -406,8 +442,8 @@ export default async function handler(req, res) {
 
       try {
         if (action === 'sync_orders') {
-          const imported = await syncBigCommerceOrders(sb, orgId, secret.credentials)
-          return res.status(200).json({ ok: true, imported })
+          const out = await syncBigCommerceOrders(sb, orgId, secret.credentials)
+          return res.status(200).json({ ok: true, ...out })
         }
         const lines = await loadBigCommerceOrderLines(
           sb, orgId, secret.credentials, req.body.order_id
@@ -438,12 +474,22 @@ export default async function handler(req, res) {
         { onConflict: 'org_id,provider' }
       )
 
+      // The store hash is not a credential on its own, and the app needs it to
+      // build links into the platform's admin.
+      const publicConfig = { ...(config ?? {}) }
+      if (provider === 'bigcommerce' && credentials.store_hash) {
+        publicConfig.store_hash = credentials.store_hash
+      }
+      if (provider === 'shopify' && credentials.shop_domain) {
+        publicConfig.shop_domain = credentials.shop_domain
+      }
+
       await sb.from('integration_settings').upsert(
         {
           org_id: orgId,
           provider,
           variant: variant ?? null,
-          config: config ?? {},
+          config: publicConfig,
           is_active: result.ok,
           status: result.ok ? 'connected' : 'error',
           last_tested_at: new Date().toISOString(),
