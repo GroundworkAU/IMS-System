@@ -255,3 +255,48 @@ select.input { background: var(--surface); }
 .user-meta { display: flex; flex-direction: column; line-height: 1.25; text-align: right; }
 .user-name { color: var(--cream); font-weight: 500; }
 .user-role { font-size: 11px; color: #b09a8c; }
+
+/* ---------- Modal ---------- */
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(45, 13, 5, 0.45);
+  display: grid; place-items: center; padding: 20px; z-index: 60;
+}
+.modal {
+  background: var(--surface); border: 1px solid var(--blush);
+  border-radius: 14px; width: 460px; max-width: 100%;
+  max-height: 90vh; display: flex; flex-direction: column;
+}
+.modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 20px 14px; border-bottom: 1px solid var(--blush);
+}
+.modal-title {
+  font-family: var(--font-head); font-size: 18px; font-weight: 600;
+  margin: 0; color: var(--dark-brown);
+}
+.modal-close {
+  background: none; border: none; font-size: 15px; color: var(--muted);
+  padding: 4px 8px; border-radius: 6px;
+}
+.modal-close:hover { background: var(--cream); color: var(--dark-brown); }
+.modal-body { padding: 20px; overflow-y: auto; }
+.modal-foot {
+  display: flex; justify-content: flex-end; gap: 10px;
+  padding: 14px 20px; border-top: 1px solid var(--blush);
+}
+
+.field-hint { font-size: 12px; color: var(--muted); margin: 6px 0 0; line-height: 1.5; }
+.check-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  font-size: 13.5px; color: var(--text); line-height: 1.5;
+}
+.check-row input { margin-top: 3px; }
+
+.row-muted td { opacity: 0.55; }
+.you-tag {
+  display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 20px;
+  background: var(--cream); border: 1px solid var(--blush);
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--muted);
+}
+.table-wrap { overflow-x: auto; }
