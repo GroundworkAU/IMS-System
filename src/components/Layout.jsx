@@ -81,6 +81,7 @@ function SidebarInner({ org, onNavigate, onSignOut }) {
 
       <div className="sidebar-foot">
         <div>{org?.name || 'Setting up'}</div>
+        <div style={{ fontSize: 10, opacity: 0.6, marginTop: 4 }}>build {__BUILD__}</div>
         {onSignOut && (
           <button className="linklike" style={{ color: '#b09a8c', marginTop: 8 }} onClick={onSignOut}>
             Sign out
