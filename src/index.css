@@ -678,3 +678,30 @@ a.btn { display: inline-block; text-decoration: none; }
 .item-list > .item-line { flex: 0 0 auto; }
 .line-picker > .line-row { flex: 0 0 auto; }
 .result-list > .result-row { flex: 0 0 auto; }
+
+/* ---------- Selected summary chips ---------- */
+.selected-summary {
+  margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--blush);
+}
+.selected-summary summary {
+  cursor: pointer; font-size: 0.68rem; text-transform: uppercase;
+  letter-spacing: 0.08em; font-weight: 700; color: var(--muted);
+}
+.selected-chips {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px;
+  max-height: 130px; overflow-y: auto;
+}
+.selected-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--cream); border: 1px solid var(--blush); border-radius: 20px;
+  padding: 4px 6px 4px 12px; font-size: 12.5px;
+}
+.selected-chip strong { color: var(--deep-brown); }
+.chip-x {
+  border: none; background: none; color: var(--muted);
+  font-size: 12px; padding: 2px 6px; border-radius: 50%;
+}
+.chip-x:hover { background: var(--blush); color: var(--red); }
+
+/* Catalogue can breathe now that it has the full width */
+.browse-tall { max-height: 70vh; }
