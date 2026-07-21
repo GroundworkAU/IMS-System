@@ -390,7 +390,7 @@ async function checkRefundsForOpenReturns(sb, orgId, creds) {
 // Product catalogue sync. Pulls products with their variants and upserts them,
 // keyed on the platform's own ids so repeat syncs update rather than duplicate.
 // ---------------------------------------------------------------------------
-async function syncBigCommerceProducts(sb, orgId, creds) {
+async function syncBigCommerceProducts(sb, orgId, creds, config = {}) {
   const problems = []
   const now = new Date().toISOString()
 
@@ -409,9 +409,14 @@ async function syncBigCommerceProducts(sb, orgId, creds) {
     problems.push(`Could not read brands: ${err.message}`)
   }
 
+  const wanted = (config.sync_brands ?? []).map((b) => String(b).trim().toLowerCase())
+  const keepBrand = (name) =>
+    wanted.length === 0 || wanted.includes(String(name ?? '').trim().toLowerCase())
+
   let page = 1
   let products = 0
   let variants = 0
+  let skipped = 0
 
   // Work a page at a time, writing in bulk rather than row by row. Doing a
   // database round trip per product made this take minutes.
@@ -423,7 +428,13 @@ async function syncBigCommerceProducts(sb, orgId, creds) {
     const list = body?.data ?? []
     if (list.length === 0) break
 
-    const productRows = list.map((p) => ({
+    const kept = list.filter((p) => {
+      const ok = keepBrand(p.brand_id ? brandNames[p.brand_id] : null)
+      if (!ok) skipped += 1
+      return ok
+    })
+
+    const productRows = kept.map((p) => ({
       org_id: orgId,
       external_source: 'bigcommerce',
       external_id: String(p.id),
@@ -437,22 +448,22 @@ async function syncBigCommerceProducts(sb, orgId, creds) {
       last_synced_at: now,
     }))
 
-    const { data: savedProducts, error: pErr } = await sb
-      .from('products')
-      .upsert(productRows, { onConflict: 'org_id,external_source,external_id' })
-      .select('id, external_id')
-
-    if (pErr) {
-      problems.push(`Products: ${pErr.message}`)
-      break
+    let savedProducts = []
+    if (productRows.length) {
+      const { data, error: pErr } = await sb
+        .from('products')
+        .upsert(productRows, { onConflict: 'org_id,external_source,external_id' })
+        .select('id, external_id')
+      if (pErr) { problems.push(`Products: ${pErr.message}`); break }
+      savedProducts = data ?? []
     }
-    products += savedProducts?.length ?? 0
+    products += savedProducts.length
 
     const productIdByExternal = {}
-    for (const row of savedProducts ?? []) productIdByExternal[row.external_id] = row.id
+    for (const row of savedProducts) productIdByExternal[row.external_id] = row.id
 
     const variantRows = []
-    for (const p of list) {
+    for (const p of kept) {
       const productId = productIdByExternal[String(p.id)]
       if (!productId) continue
 
@@ -495,6 +506,7 @@ async function syncBigCommerceProducts(sb, orgId, creds) {
   return {
     products,
     variants,
+    skipped,
     ...stock,
     error: problems.length ? problems[0] : null,
   }
@@ -631,7 +643,7 @@ async function lsFetch(variant, creds, path) {
   return res.json()
 }
 
-async function syncLightspeedProducts(sb, orgId, variant, creds) {
+async function syncLightspeedProducts(sb, orgId, variant, creds, config = {}) {
   const problems = []
   const now = new Date().toISOString()
 
@@ -659,8 +671,14 @@ async function syncLightspeedProducts(sb, orgId, variant, creds) {
     problems.push(`Brands: ${err.message}`)
   }
 
+  // Optional filter: only bring in these brands. Empty means everything.
+  const wanted = (config.sync_brands ?? []).map((b) => String(b).trim().toLowerCase())
+  const keepBrand = (name) =>
+    wanted.length === 0 || wanted.includes(String(name ?? '').trim().toLowerCase())
+
   let products = 0
   let variants = 0
+  let skipped = 0
   let invFetched = 0      // records returned by the platform
   let invMatched = 0      // records we could tie to a variant and a location
   const stockRows = []
@@ -683,7 +701,13 @@ async function syncLightspeedProducts(sb, orgId, variant, creds) {
 
       // Parent products first, so variants can hang off them.
       const parents = {}
-      for (const p of list) {
+      const kept = list.filter((p) => {
+        const ok = keepBrand(p.brand_name || brandNames[String(p.brand_id)])
+        if (!ok) skipped += 1
+        return ok
+      })
+
+      for (const p of kept) {
         const parentId = p.variant_parent_id || p.id
         if (!parents[parentId]) {
           parents[parentId] = {
@@ -699,17 +723,21 @@ async function syncLightspeedProducts(sb, orgId, variant, creds) {
         }
       }
 
-      const { data: savedProducts, error: pErr } = await sb
-        .from('products')
-        .upsert(Object.values(parents), { onConflict: 'org_id,external_source,external_id' })
-        .select('id, external_id')
-
-      if (pErr) { problems.push(`Products: ${pErr.message}`); break }
-      for (const row of savedProducts ?? []) productIdByExternal[row.external_id] = row.id
-      products += savedProducts?.length ?? 0
+      const parentRows = Object.values(parents)
+      let savedProducts = []
+      if (parentRows.length) {
+        const { data, error: pErr } = await sb
+          .from('products')
+          .upsert(parentRows, { onConflict: 'org_id,external_source,external_id' })
+          .select('id, external_id')
+        if (pErr) { problems.push(`Products: ${pErr.message}`); break }
+        savedProducts = data ?? []
+      }
+      for (const row of savedProducts) productIdByExternal[row.external_id] = row.id
+      products += savedProducts.length
 
       const variantRows = []
-      for (const p of list) {
+      for (const p of kept) {
         const parentId = String(p.variant_parent_id || p.id)
         const productId = productIdByExternal[parentId]
         if (!productId) continue
@@ -803,7 +831,13 @@ async function syncLightspeedProducts(sb, orgId, variant, creds) {
       const list = Array.isArray(raw) ? raw : raw ? [raw] : []
       if (list.length === 0) break
 
-      const productRows = list.map((it) => ({
+      const keptItems = list.filter((it) => {
+        const ok = keepBrand(brandNames[String(it.manufacturerID)])
+        if (!ok) skipped += 1
+        return ok
+      })
+
+      const productRows = keptItems.map((it) => ({
         org_id: orgId,
         external_source: 'lightspeed',
         external_id: String(it.itemID),
@@ -824,7 +858,7 @@ async function syncLightspeedProducts(sb, orgId, variant, creds) {
       const productIdByExternal = {}
       for (const row of savedProducts ?? []) productIdByExternal[row.external_id] = row.id
 
-      const variantRows = list.map((it) => ({
+      const variantRows = keptItems.map((it) => ({
         org_id: orgId,
         product_id: productIdByExternal[String(it.itemID)],
         external_source: 'lightspeed',
@@ -848,7 +882,7 @@ async function syncLightspeedProducts(sb, orgId, variant, creds) {
           const variantIdByExternal = {}
           for (const row of savedVariants ?? []) variantIdByExternal[row.external_id] = row.id
 
-          for (const it of list) {
+          for (const it of keptItems) {
             const shops = it.ItemShops?.ItemShop
             const shopList = Array.isArray(shops) ? shops : shops ? [shops] : []
             invFetched += shopList.length
@@ -887,6 +921,7 @@ async function syncLightspeedProducts(sb, orgId, variant, creds) {
   return {
     products,
     variants,
+    skipped,
     stockRows: written,
     invFetched,
     invMatched,
@@ -1103,13 +1138,14 @@ export default async function handler(req, res) {
 
       const { data: setting } = await sb
         .from('integration_settings')
-        .select('variant')
+        .select('variant, config')
         .match({ org_id: orgId, provider })
         .maybeSingle()
 
       const result = await testConnection(provider, setting?.variant, secret.credentials)
 
-      const backfill = {}
+      // Merge, never replace: config also holds the sync filters.
+      const backfill = { ...(setting?.config ?? {}) }
       if (provider === 'bigcommerce' && secret.credentials.store_hash) {
         backfill.store_hash = secret.credentials.store_hash
       }
@@ -1202,18 +1238,21 @@ export default async function handler(req, res) {
           return res.status(200).json({ ok: !out.error, ...out })
         }
         if (action === 'sync_products') {
+          const { data: setting } = await sb
+            .from('integration_settings')
+            .select('variant, config')
+            .match({ org_id: orgId, provider })
+            .maybeSingle()
+
           if (provider === 'lightspeed') {
-            const { data: setting } = await sb
-              .from('integration_settings')
-              .select('variant')
-              .match({ org_id: orgId, provider })
-              .maybeSingle()
             const out = await syncLightspeedProducts(
-              sb, orgId, setting?.variant ?? 'xseries', secret.credentials
+              sb, orgId, setting?.variant ?? 'xseries', secret.credentials, setting?.config ?? {}
             )
             return res.status(200).json({ ok: !out.error, ...out })
           }
-          const out = await syncBigCommerceProducts(sb, orgId, secret.credentials)
+          const out = await syncBigCommerceProducts(
+            sb, orgId, secret.credentials, setting?.config ?? {}
+          )
           return res.status(200).json({ ok: !out.error, ...out })
         }
         if (action === 'check_refunds') {
@@ -1255,7 +1294,13 @@ export default async function handler(req, res) {
 
       // The store hash is not a credential on its own, and the app needs it to
       // build links into the platform's admin.
-      const publicConfig = { ...(config ?? {}) }
+      const { data: existing } = await sb
+        .from('integration_settings')
+        .select('config')
+        .match({ org_id: orgId, provider })
+        .maybeSingle()
+
+      const publicConfig = { ...(existing?.config ?? {}), ...(config ?? {}) }
       if (provider === 'bigcommerce' && credentials.store_hash) {
         publicConfig.store_hash = credentials.store_hash
       }

@@ -790,3 +790,10 @@ a.btn { display: inline-block; text-decoration: none; }
 @media (max-width: 560px) {
   .link-row { grid-template-columns: 1fr; gap: 6px; }
 }
+
+.sync-filter { padding: 14px 0; border-bottom: 1px solid var(--blush); }
+.sync-filter:last-child { border-bottom: none; padding-bottom: 0; }
+.sync-filter-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 12px; margin-bottom: 10px; flex-wrap: wrap;
+}

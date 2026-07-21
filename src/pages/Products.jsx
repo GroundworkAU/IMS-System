@@ -93,6 +93,7 @@ export default function Products() {
       }
 
       let bit = `${label}: ${res.products} products, ${res.variants} variants`
+      if (res.skipped) bit += `, ${res.skipped} skipped by your brand filter`
       if (res.stockRows) {
         bit += `, stock on ${res.stockRows} lines`
         if (res.invFetched && res.invMatched < res.invFetched) {

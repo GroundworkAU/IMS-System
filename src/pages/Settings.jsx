@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { PLATFORMS } from '../lib/platforms'
 import ConnectionCard from '../components/ConnectionCard'
 import Locations from './Locations'
+import SyncFilters from '../components/SyncFilters'
 
 export default function Settings() {
   const { org, isAdmin, refresh } = useAuth()
@@ -179,6 +180,13 @@ export default function Settings() {
           </>
         )}
       </div>
+
+      {connectable.length > 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h3 className="section-title">What to sync</h3>
+          <SyncFilters orgId={org?.id} providers={connectable} />
+        </div>
+      )}
 
       <div className="card" style={{ marginBottom: 16 }}>
         <p className="page-desc" style={{ marginBottom: 14 }}>
