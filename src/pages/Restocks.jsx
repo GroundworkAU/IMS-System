@@ -388,6 +388,12 @@ export default function Restocks() {
                         Check off received
                       </button>
                     )}
+                    <button
+                      className="btn"
+                      onClick={() => navigate(`/restocks/orders/${o.id}`)}
+                    >
+                      View
+                    </button>
                   </div>
                 </header>
 

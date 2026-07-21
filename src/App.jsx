@@ -14,6 +14,7 @@ import Locations from './pages/Locations'
 import Restocks from './pages/Restocks'
 import NewRestockRequest from './pages/NewRestockRequest'
 import FulfilRequest from './pages/FulfilRequest'
+import RestockOrder from './pages/RestockOrder'
 import Inbound from './pages/Inbound'
 import GoodsInwards from './pages/GoodsInwards'
 import GoodsOutwards from './pages/GoodsOutwards'
@@ -46,6 +47,7 @@ export default function App() {
         <Route path="/restocks" element={<Restocks />} />
         <Route path="/restocks/new" element={<NewRestockRequest />} />
         <Route path="/restocks/:requestId/fulfil" element={<FulfilRequest />} />
+        <Route path="/restocks/orders/:orderId" element={<RestockOrder />} />
         <Route path="/inbound" element={<Inbound />} />
         <Route path="/goods-inwards" element={<GoodsInwards />} />
         <Route path="/goods-outwards" element={<GoodsOutwards />} />
