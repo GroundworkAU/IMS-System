@@ -15,10 +15,10 @@ export default function Restocks() {
   const [tab, setTab] = useState('requests')
   const [requests, setRequests] = useState([])
   const [orders, setOrders] = useState([])
+  const [inProgress, setInProgress] = useState([])
   const [locations, setLocations] = useState([])
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState(null)
-  const [fulfilling, setFulfilling] = useState(null)
   const [receiving, setReceiving] = useState(null)
 
   const load = useCallback(async () => {
@@ -36,9 +36,12 @@ export default function Restocks() {
         .select('id, name, type, external_refs')
         .eq('is_active', true).order('name'),
     ])
+
+    const building = (ro.data ?? []).filter((o) => o.status === 'building')
     if (rq.error) setStatus({ type: 'err', text: rq.error.message })
     setRequests(rq.data ?? [])
-    setOrders(ro.data ?? [])
+    setOrders((ro.data ?? []).filter((o) => o.status !== 'building'))
+    setInProgress(building)
     setLocations(loc.data ?? [])
     setLoading(false)
   }, [])
@@ -143,6 +146,9 @@ export default function Restocks() {
               { key: 'requests', label: 'Requests', count: requests.length - drafts.length },
               { key: 'drafts', label: 'Drafts', count: drafts.length },
               { key: 'orders', label: 'Restock orders', count: orders.length },
+              ...(inProgress.length
+                ? [{ key: 'progress', label: 'Being fulfilled', count: inProgress.length }]
+                : []),
             ].map((t) => (
               <button
                 key={t.key}
@@ -161,6 +167,42 @@ export default function Restocks() {
 
         {loading ? (
           <p className="page-desc">Loading...</p>
+        ) : tab === 'progress' ? (
+          <div className="return-list">
+            {inProgress.map((o) => (
+              <article key={o.id} className="return-card">
+                <header className="return-card-head">
+                  <div className="return-ident">
+                    <span className="return-order">{o.reference}</span>
+                    <span className="return-customer">
+                      {o.source?.name || '?'} to {o.destination?.name || '?'}
+                    </span>
+                  </div>
+                  <div className="return-card-actions">
+                    <span className="status-pill warn">Not finished</span>
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => navigate(`/restocks/${o.request_id}/fulfil`)}
+                    >
+                      Continue
+                    </button>
+                  </div>
+                </header>
+                <div className="stack-body">
+                  <div className="fact-row">
+                    <span>
+                      <span className="fact-label">Started</span>
+                      {formatDate(o.created_at)} by {o.fulfiller?.full_name || 'Unknown'}
+                    </span>
+                    <span>
+                      <span className="fact-label">So far</span>
+                      {(o.restock_order_lines ?? []).reduce((n, l) => n + (l.qty_sent || 0), 0)} items
+                    </span>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
         ) : tab === 'drafts' ? (
           drafts.length === 0 ? (
             <div className="empty-state">
@@ -232,10 +274,19 @@ export default function Restocks() {
                       </span>
                     </div>
                     <div className="return-card-actions">
-                      <StatusPill status={r.status} />
+                      {inProgress.some((o) => o.request_id === r.id) ? (
+                        <span className="status-pill warn">Being fulfilled</span>
+                      ) : (
+                        <StatusPill status={r.status} />
+                      )}
                       {(r.status === 'open' || r.status === 'partly_fulfilled') && (
-                        <button className="btn btn-primary" onClick={() => setFulfilling(r)}>
-                          Fulfil
+                        <button
+                          className="btn btn-primary"
+                          onClick={() => navigate(`/restocks/${r.id}/fulfil`)}
+                        >
+                          {inProgress.some((o) => o.request_id === r.id)
+                            ? 'Continue fulfilling'
+                            : 'Fulfil'}
                         </button>
                       )}
                     </div>
@@ -347,20 +398,6 @@ export default function Restocks() {
         )}
       </div>
 
-      {fulfilling && (
-        <FulfilModal
-          request={fulfilling}
-          locations={locations}
-          profile={profile}
-          onClose={() => setFulfilling(null)}
-          onSaved={() => {
-            setFulfilling(null)
-            setStatus({ type: 'ok', text: 'Restock order created.' })
-            load()
-          }}
-        />
-      )}
-
       {receiving && (
         <ReceiveModal
           order={receiving}
@@ -395,171 +432,6 @@ function StatusPill({ status }) {
   }
   const [tone, label] = map[status] ?? ['neutral', status]
   return <span className={`status-pill ${tone}`}>{label}</span>
-}
-
-// ---------------------------------------------------------------------------
-// Fulfil what you can, from a source location
-// ---------------------------------------------------------------------------
-function FulfilModal({ request, locations, profile, onClose, onSaved }) {
-  const [source, setSource] = useState('')
-  const [note, setNote] = useState('')
-  const [qty, setQty] = useState(() => {
-    const start = {}
-    for (const l of request.restock_request_lines ?? []) {
-      start[l.id] = Math.max(0, l.qty_requested - l.qty_fulfilled)
-    }
-    return start
-  })
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState(null)
-
-  async function save() {
-    if (!source) return setError('Choose which location you are sending from.')
-
-    const lines = (request.restock_request_lines ?? [])
-      .map((l) => ({ line: l, qty: Number(qty[l.id]) || 0 }))
-      .filter((x) => x.qty > 0)
-
-    if (lines.length === 0) return setError('Enter a quantity for at least one item.')
-
-    setBusy(true)
-    setError(null)
-
-    const { data: order, error: oErr } = await supabase
-      .from('restock_orders')
-      .insert({
-        org_id: profile.org_id,
-        reference: await nextReference('restock_order', 'RO-'),
-        request_id: request.id,
-        source_location_id: source,
-        destination_location_id: request.destination_location_id ?? null,
-        status: 'draft',
-        note: note.trim() || null,
-        fulfilled_by: profile.id,
-      })
-      .select('id')
-      .single()
-
-    if (oErr) { setBusy(false); return setError(oErr.message) }
-
-    const { error: lErr } = await supabase.from('restock_order_lines').insert(
-      lines.map(({ line, qty: q }) => ({
-        org_id: profile.org_id,
-        order_id: order.id,
-        request_line_id: line.id,
-        variant_id: line.variant_id ?? null,
-        name: line.name,
-        sku: line.sku,
-        qty_sent: q,
-      }))
-    )
-    if (lErr) { setBusy(false); return setError(lErr.message) }
-
-    // Update how much of each requested line is now covered.
-    for (const { line, qty: q } of lines) {
-      await supabase
-        .from('restock_request_lines')
-        .update({ qty_fulfilled: (line.qty_fulfilled ?? 0) + q })
-        .eq('id', line.id)
-    }
-
-    const allCovered = (request.restock_request_lines ?? []).every((l) => {
-      const added = lines.find((x) => x.line.id === l.id)?.qty ?? 0
-      return (l.qty_fulfilled ?? 0) + added >= l.qty_requested
-    })
-
-    await supabase
-      .from('restock_requests')
-      .update({ status: allCovered ? 'fulfilled' : 'partly_fulfilled' })
-      .eq('id', request.id)
-
-    setBusy(false)
-    onSaved()
-  }
-
-  return (
-    <Modal
-      title={`Fulfil ${request.reference}`}
-      onClose={onClose}
-      footer={
-        <>
-          <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={save} disabled={busy}>
-            {busy ? 'Creating...' : 'Create restock order'}
-          </button>
-        </>
-      }
-    >
-      <div className="field">
-        <label htmlFor="fl-source">Sending from</label>
-        <select
-          id="fl-source"
-          className="input"
-          value={source}
-          onChange={(e) => setSource(e.target.value)}
-        >
-          <option value="">Choose a location...</option>
-          {locations
-            .filter((l) => l.id !== request.destination_location_id)
-            .map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-                {l.external_refs?.lightspeed ? '' : ' (not linked to Lightspeed)'}
-              </option>
-            ))}
-        </select>
-        <p className="field-hint">
-          Locations come from your Locations page. Linking one to a Lightspeed outlet lets us
-          raise the transfer there later.
-        </p>
-      </div>
-
-      <h4 className="sub-label">How much can you send?</h4>
-      <div className="line-picker">
-        {(request.restock_request_lines ?? []).map((l) => {
-          const outstanding = Math.max(0, l.qty_requested - (l.qty_fulfilled ?? 0))
-          return (
-            <div key={l.id} className="line-row selected">
-              <div className="line-row-head">
-                <span>
-                  <span className="cell-strong">{l.name}</span>
-                  <span className="cell-sub">
-                    {l.sku || 'No SKU'} · asked for {l.qty_requested}
-                    {l.qty_fulfilled > 0 && `, ${l.qty_fulfilled} already sent`}
-                  </span>
-                </span>
-                <label style={{ fontSize: 11.5, color: 'var(--muted)', fontWeight: 600 }}>
-                  Sending
-                  <input
-                    className="input mini"
-                    type="number"
-                    min="0"
-                    max={outstanding}
-                    value={qty[l.id] ?? 0}
-                    onChange={(e) => setQty({ ...qty, [l.id]: e.target.value })}
-                    style={{ marginTop: 4 }}
-                  />
-                </label>
-              </div>
-            </div>
-          )
-        })}
-      </div>
-
-      <div className="field" style={{ marginTop: 16, marginBottom: 0 }}>
-        <label htmlFor="fl-note">Note (optional)</label>
-        <textarea
-          id="fl-note"
-          className="input"
-          rows="2"
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-        />
-      </div>
-
-      {error && <div className="auth-msg err">{error}</div>}
-    </Modal>
-  )
 }
 
 // ---------------------------------------------------------------------------
