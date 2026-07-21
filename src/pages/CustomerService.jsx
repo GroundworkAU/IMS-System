@@ -45,11 +45,22 @@ export default function CustomerService() {
     setStatus(null)
     const res = await syncOrders('bigcommerce')
     setSyncing(false)
-    if (res.ok) {
-      setStatus({ type: 'ok', text: `Brought in ${res.imported} orders.` })
-      load(query)
-    } else {
+    if (!res.ok) {
       setStatus({ type: 'err', text: res.error || 'Sync failed.' })
+    } else if (res.error) {
+      // Orders came back from the platform but could not be saved.
+      setStatus({
+        type: 'err',
+        text: `Found ${res.fetched} orders but could not save them: ${res.error}`,
+      })
+    } else if (res.fetched === 0) {
+      setStatus({
+        type: 'err',
+        text: 'BigCommerce returned no orders. Check the API account has read access to Orders.',
+      })
+    } else {
+      setStatus({ type: 'ok', text: `Brought in ${res.imported} of ${res.fetched} orders.` })
+      load(query)
     }
   }
 

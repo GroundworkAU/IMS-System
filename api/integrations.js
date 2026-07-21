@@ -164,16 +164,18 @@ async function syncBigCommerceOrders(sb, orgId, creds, sinceDays = 120) {
     channel = created
   }
 
-  const since = new Date(Date.now() - sinceDays * 86400000).toISOString()
   let page = 1
   let imported = 0
+  let fetched = 0
+  const problems = []
 
   while (page <= 8) {
     const orders = await bcFetch(
       creds,
-      `/v2/orders?limit=250&page=${page}&sort=date_created:desc&min_date_created=${encodeURIComponent(since)}`
+      `/v2/orders?limit=250&page=${page}&sort=date_created:desc`
     )
     if (!Array.isArray(orders) || orders.length === 0) break
+    fetched += orders.length
 
     for (const o of orders) {
       let customerId = null
@@ -205,7 +207,7 @@ async function syncBigCommerceOrders(sb, orgId, creds, sinceDays = 120) {
         }
       }
 
-      await sb.from('orders').upsert(
+      const { error: orderErr } = await sb.from('orders').upsert(
         {
           org_id: orgId,
           channel_id: channel.id,
@@ -227,7 +229,12 @@ async function syncBigCommerceOrders(sb, orgId, creds, sinceDays = 120) {
         },
         { onConflict: 'org_id,channel_id,external_order_id' }
       )
-      imported += 1
+
+      if (orderErr) {
+        if (problems.length < 3) problems.push(orderErr.message)
+      } else {
+        imported += 1
+      }
     }
 
     if (orders.length < 250) break
@@ -261,7 +268,12 @@ async function syncBigCommerceOrders(sb, orgId, creds, sinceDays = 120) {
     autoClosed = updated?.length ?? 0
   }
 
-  return { imported, autoClosed }
+  return {
+    imported,
+    fetched,
+    autoClosed,
+    error: problems.length ? problems[0] : null,
+  }
 }
 
 async function loadBigCommerceOrderLines(sb, orgId, creds, orderId) {
