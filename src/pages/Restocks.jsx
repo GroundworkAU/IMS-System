@@ -271,7 +271,7 @@ export default function Restocks() {
                     <LineGroups
                       images={images}
                       lines={(r.restock_request_lines ?? []).map((l) => ({
-                        id: l.id, name: l.name, qty: l.qty_requested,
+                        id: l.id, name: l.name, sku: l.sku, qty: l.qty_requested,
                       }))}
                       limit={2}
                       emptyText="Nothing added yet"
@@ -344,7 +344,7 @@ export default function Restocks() {
                     <LineGroups
                       images={images}
                       lines={(r.restock_request_lines ?? []).map((l) => ({
-                        id: l.id, name: l.name, qty: l.qty_requested,
+                        id: l.id, name: l.name, sku: l.sku, qty: l.qty_requested,
                       }))}
                     />
                   </div>
@@ -402,10 +402,13 @@ export default function Restocks() {
 
                   <LineGroups
                     images={images}
+                    showReceived={o.status !== 'draft'}
                     lines={(o.restock_order_lines ?? []).map((l) => ({
                       id: l.id,
                       name: l.name,
+                      sku: l.sku,
                       qty: l.qty_sent,
+                      received: l.qty_received,
                     }))}
                   />
 

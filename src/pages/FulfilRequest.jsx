@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import BackLink from '../components/BackLink'
 import { nextReference } from '../lib/references'
 import { sortVariants } from '../lib/sizes'
 
@@ -248,6 +249,8 @@ export default function FulfilRequest() {
 
   return (
     <div>
+      <BackLink to="/restocks" label="Back to restocks" />
+
       <div className="page-head">
         <div className="eyebrow">Inventory</div>
         <h2 className="page-title">Fulfil {request.reference}</h2>

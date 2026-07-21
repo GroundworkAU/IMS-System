@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import BackLink from '../components/BackLink'
 import CatalogueBrowser from '../components/CatalogueBrowser'
 import RequestDrawer from '../components/RequestDrawer'
 import { nextReference } from '../lib/references'
@@ -181,6 +182,8 @@ export default function NewRestockRequest() {
 
   return (
     <div>
+      <BackLink to="/restocks" label="Back to restocks" />
+
       <div className="page-head">
         <div className="eyebrow">Inventory</div>
         <h2 className="page-title">
