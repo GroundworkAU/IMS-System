@@ -175,9 +175,14 @@ async function syncBigCommerceOrders(sb, orgId, creds, sinceDays = 120) {
       `/v2/orders?limit=250&page=${page}&sort=date_created:desc`
     )
     if (!Array.isArray(orders) || orders.length === 0) break
-    fetched += orders.length
 
-    for (const o of orders) {
+    // Incomplete orders are abandoned carts, not real orders.
+    const real = orders.filter(
+      (o) => Number(o.status_id) !== 0 && String(o.status || '').toLowerCase() !== 'incomplete'
+    )
+    fetched += real.length
+
+    for (const o of real) {
       let customerId = null
       const email = (o.billing_address?.email || '').trim().toLowerCase()
 
@@ -240,6 +245,13 @@ async function syncBigCommerceOrders(sb, orgId, creds, sinceDays = 120) {
     if (orders.length < 250) break
     page += 1
   }
+
+  // Remove anything previously brought in as an incomplete cart.
+  await sb
+    .from('orders')
+    .delete()
+    .eq('org_id', orgId)
+    .in('status', ['Incomplete', 'incomplete'])
 
   // Any open return whose order now shows as refunded on the platform gets
   // marked refunded automatically, so the list reflects reality without anyone
