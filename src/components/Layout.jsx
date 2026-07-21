@@ -46,7 +46,7 @@ function titleFor(pathname) {
 }
 
 export default function Layout() {
-  const { user, profile, signOut } = useAuth()
+  const { user, profile, org, signOut } = useAuth()
   const { pathname } = useLocation()
   const email = user?.email ?? ''
   const initials = (profile?.full_name || email || '?').trim().slice(0, 1).toUpperCase()

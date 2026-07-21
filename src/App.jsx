@@ -2,6 +2,7 @@ import { Routes, Route } from 'react-router-dom'
 import ProtectedRoute from './components/ProtectedRoute'
 import Layout from './components/Layout'
 import Login from './pages/Login'
+import Join from './pages/Join'
 import Dashboard from './pages/Dashboard'
 import PurchaseOrders from './pages/PurchaseOrders'
 import Suppliers from './pages/Suppliers'
@@ -19,6 +20,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/join" element={<Join />} />
       <Route
         element={
           <ProtectedRoute>
