@@ -26,7 +26,7 @@ function group(lines) {
   return groups
 }
 
-export default function LineGroups({ lines, limit = 3, emptyText = 'Nothing added yet' }) {
+export default function LineGroups({ lines, limit = 3, emptyText = 'Nothing added yet', images = {} }) {
   const [expanded, setExpanded] = useState(false)
   const groups = group(lines)
 
@@ -40,7 +40,12 @@ export default function LineGroups({ lines, limit = 3, emptyText = 'Nothing adde
       {shown.map((g) => (
         <div key={g.product} className="line-group">
           <div className="line-group-head">
-            <span className="cell-strong">{g.product}</span>
+            <span className="line-group-name">
+              {images[g.product]
+                ? <img className="thumb thumb-sm" src={images[g.product]} alt="" loading="lazy" />
+                : <span className="thumb thumb-sm thumb-blank" />}
+              <span className="cell-strong">{g.product}</span>
+            </span>
             <span className="line-group-total">{g.total}</span>
           </div>
           <div className="size-chips">

@@ -16,6 +16,7 @@ export default function Restocks() {
   const [requests, setRequests] = useState([])
   const [orders, setOrders] = useState([])
   const [inProgress, setInProgress] = useState([])
+  const [images, setImages] = useState({})
   const [locations, setLocations] = useState([])
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState(null)
@@ -43,6 +44,31 @@ export default function Restocks() {
     setOrders((ro.data ?? []).filter((o) => o.status !== 'building'))
     setInProgress(building)
     setLocations(loc.data ?? [])
+
+    // Thumbnails for the products referenced by these lines, keyed on product
+    // name so the grouped view can show them.
+    const variantIds = [
+      ...(rq.data ?? []).flatMap((r) =>
+        (r.restock_request_lines ?? []).map((l) => l.variant_id)),
+      ...(ro.data ?? []).flatMap((o) =>
+        (o.restock_order_lines ?? []).map((l) => l.variant_id)),
+    ].filter(Boolean)
+
+    if (variantIds.length) {
+      const { data: vs } = await supabase
+        .from('variants')
+        .select('id, products(name, image_url)')
+        .in('id', [...new Set(variantIds)])
+
+      const map = {}
+      for (const v of vs ?? []) {
+        if (v.products?.name && v.products?.image_url) {
+          map[v.products.name] = v.products.image_url
+        }
+      }
+      setImages(map)
+    }
+
     setLoading(false)
   }, [])
 
@@ -243,6 +269,7 @@ export default function Restocks() {
                       </span>
                     </div>
                     <LineGroups
+                      images={images}
                       lines={(r.restock_request_lines ?? []).map((l) => ({
                         id: l.id, name: l.name, qty: l.qty_requested,
                       }))}
@@ -315,6 +342,7 @@ export default function Restocks() {
                     </div>
 
                     <LineGroups
+                      images={images}
                       lines={(r.restock_request_lines ?? []).map((l) => ({
                         id: l.id, name: l.name, qty: l.qty_requested,
                       }))}
@@ -373,6 +401,7 @@ export default function Restocks() {
                   </div>
 
                   <LineGroups
+                    images={images}
                     lines={(o.restock_order_lines ?? []).map((l) => ({
                       id: l.id,
                       name: l.name,

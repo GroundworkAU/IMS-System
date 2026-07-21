@@ -16,6 +16,7 @@ export default function FulfilRequest() {
   const [note, setNote] = useState('')
   const [qty, setQty] = useState({})          // requestLineId -> qty
   const [stock, setStock] = useState({})      // variantId -> { locationId: onHand }
+  const [info, setInfo] = useState({})        // variantId -> product and option details
   const [orderId, setOrderId] = useState(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -61,10 +62,16 @@ export default function FulfilRequest() {
       .filter(Boolean)
 
     if (variantIds.length) {
-      const { data: levels } = await supabase
-        .from('inventory_levels')
-        .select('variant_id, location_id, on_hand')
-        .in('variant_id', variantIds)
+      const [{ data: levels }, { data: vs }] = await Promise.all([
+        supabase
+          .from('inventory_levels')
+          .select('variant_id, location_id, on_hand')
+          .in('variant_id', variantIds),
+        supabase
+          .from('variants')
+          .select('id, sku, option_name, products(id, name, image_url, external_brand)')
+          .in('id', variantIds),
+      ])
 
       const map = {}
       for (const lvl of levels ?? []) {
@@ -72,6 +79,18 @@ export default function FulfilRequest() {
         map[lvl.variant_id][lvl.location_id] = lvl.on_hand
       }
       setStock(map)
+
+      const details = {}
+      for (const v of vs ?? []) {
+        details[v.id] = {
+          productId: v.products?.id ?? null,
+          productName: v.products?.name ?? null,
+          brand: v.products?.external_brand ?? null,
+          image: v.products?.image_url ?? null,
+          option: v.option_name ?? null,
+        }
+      }
+      setInfo(details)
     }
 
     setLoading(false)
@@ -82,6 +101,25 @@ export default function FulfilRequest() {
   const lines = request?.restock_request_lines ?? []
   const outstanding = (l) => Math.max(0, l.qty_requested - (l.qty_fulfilled ?? 0))
   const available = (l) => (source && l.variant_id ? stock[l.variant_id]?.[source] ?? 0 : null)
+
+  // Group the requested lines under their product, the way the product pages
+  // show them, so a guernsey in six sizes reads as one block.
+  const groups = []
+  const byKey = {}
+  for (const l of lines) {
+    const d = info[l.variant_id] ?? {}
+    const rawName = l.name ?? ''
+    const idx = rawName.lastIndexOf(' ~ ')
+    const productName = d.productName ?? (idx === -1 ? rawName : rawName.slice(0, idx))
+    const option = d.option ?? (idx === -1 ? null : rawName.slice(idx + 3))
+    const key = d.productId ?? productName
+
+    if (!byKey[key]) {
+      byKey[key] = { key, name: productName, brand: d.brand, image: d.image, lines: [] }
+      groups.push(byKey[key])
+    }
+    byKey[key].lines.push({ ...l, option_name: option })
+  }
 
   const totalSending = Object.values(qty).reduce((n, v) => n + (Number(v) || 0), 0)
   const linesSending = Object.values(qty).filter((v) => Number(v) > 0).length
@@ -285,52 +323,79 @@ export default function FulfilRequest() {
           )}
         </div>
 
-        <div className="table-wrap">
-          <table className="variant-table">
-            <thead>
-              <tr>
-                <th>Item</th>
-                <th>SKU</th>
-                <th className="num">Asked for</th>
-                <th className="num">Already sent</th>
-                <th className="num">Available</th>
-                <th className="num">Sending</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortVariants(
-                lines.map((l) => ({ ...l, option_name: (l.name ?? '').split(' ~ ').pop() }))
-              ).map((l) => {
-                const have = available(l)
-                const want = outstanding(l)
-                const sending = Number(qty[l.id]) || 0
-                const short = have != null && sending > have
-                return (
-                  <tr key={l.id} className={want === 0 ? 'row-muted' : ''}>
-                    <td className="cell-strong">{l.name}</td>
-                    <td className="cell-sub">{l.sku || 'No SKU'}</td>
-                    <td className="num">{l.qty_requested}</td>
-                    <td className="num">{l.qty_fulfilled || 0}</td>
-                    <td className={'num' + (have === 0 ? ' zero' : have < 0 ? ' negative' : '')}>
-                      {have == null ? '~' : have}
-                    </td>
-                    <td className="num">
-                      <input
-                        className="input mini"
-                        type="number"
-                        min="0"
-                        value={qty[l.id] ?? ''}
-                        placeholder="0"
-                        onChange={(e) => setLineQty(l.id, e.target.value)}
-                        style={short ? { borderColor: '#c0392b' } : undefined}
-                        title={short ? 'More than you have at that location' : undefined}
-                      />
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+        <div className="product-list">
+          {groups.map((g) => {
+            const groupTotal = g.lines.reduce((n, l) => n + (Number(qty[l.id]) || 0), 0)
+            return (
+              <div key={g.key} className="product-row">
+                <div className="product-head" style={{ cursor: 'default' }}>
+                  {g.image
+                    ? <img className="thumb" src={g.image} alt="" loading="lazy" />
+                    : <span className="thumb thumb-blank" />}
+                  <span className="product-main">
+                    <span className="cell-strong">{g.name}</span>
+                    <span className="cell-sub">
+                      {g.brand || 'No brand'} · {g.lines.length} size
+                      {g.lines.length === 1 ? '' : 's'} requested
+                    </span>
+                  </span>
+                  <span className={'stock-chip' + (groupTotal === 0 ? ' zero' : '')}>
+                    sending {groupTotal}
+                  </span>
+                </div>
+
+                <div className="product-variants">
+                  <table className="variant-table">
+                    <thead>
+                      <tr>
+                        <th>Size</th>
+                        <th>SKU</th>
+                        <th className="num">Asked for</th>
+                        <th className="num">Already sent</th>
+                        <th className="num">Available</th>
+                        <th className="num">Sending</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortVariants(g.lines).map((l) => {
+                        const have = available(l)
+                        const want = outstanding(l)
+                        const sending = Number(qty[l.id]) || 0
+                        const short = have != null && sending > have
+                        return (
+                          <tr key={l.id} className={want === 0 ? 'row-muted' : ''}>
+                            <td className="cell-strong">{l.option_name || 'Single'}</td>
+                            <td className="cell-sub">{l.sku || 'No SKU'}</td>
+                            <td className="num">{l.qty_requested}</td>
+                            <td className="num">{l.qty_fulfilled || 0}</td>
+                            <td
+                              className={
+                                'num' + (have === 0 ? ' zero' : have < 0 ? ' negative' : '')
+                              }
+                            >
+                              {have == null ? '~' : have}
+                            </td>
+                            <td className="num">
+                              <input
+                                className="input mini"
+                                type="number"
+                                min="0"
+                                value={qty[l.id] ?? ''}
+                                placeholder="0"
+                                onChange={(e) => setLineQty(l.id, e.target.value)}
+                                style={short ? { borderColor: '#c0392b' } : undefined}
+                                title={short ? 'More than you have at that location' : undefined}
+                              />
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )
+          })}
         </div>
       </div>
     </div>
