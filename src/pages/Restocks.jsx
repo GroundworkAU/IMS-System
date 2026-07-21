@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/Modal'
+import ProductPicker from '../components/ProductPicker'
 
 const formatDate = (d) =>
   d ? new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'
@@ -27,7 +28,7 @@ export default function Restocks() {
         .select(`id, reference, status, note, created_at,
                  destination:destination_location_id(name),
                  requester:requested_by(full_name),
-                 restock_request_lines(id, name, sku, qty_requested, qty_fulfilled, note)`)
+                 restock_request_lines(id, variant_id, name, sku, qty_requested, qty_fulfilled, note)`)
         .order('created_at', { ascending: false })
         .limit(100),
       supabase.from('restock_orders')
@@ -379,7 +380,8 @@ function StatusPill({ status }) {
 function NewRequestModal({ locations, profile, onClose, onSaved }) {
   const [destination, setDestination] = useState('')
   const [note, setNote] = useState('')
-  const [lines, setLines] = useState([{ name: '', sku: '', qty: 1 }])
+  const [lines, setLines] = useState([])
+  const [manual, setManual] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
 
@@ -412,8 +414,9 @@ function NewRequestModal({ locations, profile, onClose, onSaved }) {
       clean.map((l) => ({
         org_id: profile.org_id,
         request_id: created.id,
+        variant_id: l.variant_id ?? null,
         name: l.name.trim(),
-        sku: l.sku.trim() || null,
+        sku: (l.sku || '').trim() || null,
         qty_requested: Number(l.qty),
       }))
     )
@@ -452,38 +455,88 @@ function NewRequestModal({ locations, profile, onClose, onSaved }) {
       </div>
 
       <h4 className="sub-label">What do you need?</h4>
-      <div className="line-picker">
+
+      <ProductPicker
+        onPick={(item) =>
+          setLines((ls) =>
+            ls.some((l) => l.variant_id && l.variant_id === item.variant_id)
+              ? ls
+              : [...ls, { ...item, qty: 1 }]
+          )
+        }
+      />
+
+      {lines.length === 0 && !manual && (
+        <p className="field-hint">
+          Search for what you need above, or{' '}
+          <button className="linklike" onClick={() => {
+            setManual(true)
+            setLines([{ name: '', sku: '', qty: 1, variant_id: null }])
+          }}>
+            add an item by hand
+          </button>{' '}
+          if it is not in the catalogue yet.
+        </p>
+      )}
+
+      <div className="line-picker" style={{ marginTop: 12 }}>
         {lines.map((l, i) => (
           <div key={i} className="line-row selected">
-            <div className="form-row">
-              <div className="field" style={{ flex: '2 1 180px', marginBottom: 0 }}>
-                <label>Product</label>
-                <input
-                  className="input"
-                  placeholder="e.g. Home Guernsey 2026"
-                  value={l.name}
-                  onChange={(e) => setLine(i, { name: e.target.value })}
-                />
+            {l.variant_id ? (
+              <div className="line-row-head">
+                <span>
+                  <span className="cell-strong">{l.name}</span>
+                  <span className="cell-sub">{l.sku || 'No SKU'}</span>
+                </span>
+                <span style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                  <label style={{ fontSize: 11.5, color: 'var(--muted)', fontWeight: 600 }}>
+                    Qty
+                    <input
+                      className="input mini"
+                      type="number"
+                      min="1"
+                      value={l.qty}
+                      onChange={(e) => setLine(i, { qty: e.target.value })}
+                      style={{ marginTop: 4 }}
+                    />
+                  </label>
+                  <button
+                    className="btn btn-quiet"
+                    onClick={() => setLines(lines.filter((_, idx) => idx !== i))}
+                  >
+                    Remove
+                  </button>
+                </span>
               </div>
-              <div className="field" style={{ flex: '1 1 110px', marginBottom: 0 }}>
-                <label>SKU</label>
-                <input
-                  className="input"
-                  value={l.sku}
-                  onChange={(e) => setLine(i, { sku: e.target.value })}
-                />
-              </div>
-              <div className="field" style={{ flex: '0 1 80px', marginBottom: 0 }}>
-                <label>Qty</label>
-                <input
-                  className="input"
-                  type="number"
-                  min="1"
-                  value={l.qty}
-                  onChange={(e) => setLine(i, { qty: e.target.value })}
-                />
-              </div>
-              {lines.length > 1 && (
+            ) : (
+              <div className="form-row">
+                <div className="field" style={{ flex: '2 1 180px', marginBottom: 0 }}>
+                  <label>Product</label>
+                  <input
+                    className="input"
+                    placeholder="e.g. Home Guernsey 2026"
+                    value={l.name}
+                    onChange={(e) => setLine(i, { name: e.target.value })}
+                  />
+                </div>
+                <div className="field" style={{ flex: '1 1 110px', marginBottom: 0 }}>
+                  <label>SKU</label>
+                  <input
+                    className="input"
+                    value={l.sku}
+                    onChange={(e) => setLine(i, { sku: e.target.value })}
+                  />
+                </div>
+                <div className="field" style={{ flex: '0 1 80px', marginBottom: 0 }}>
+                  <label>Qty</label>
+                  <input
+                    className="input"
+                    type="number"
+                    min="1"
+                    value={l.qty}
+                    onChange={(e) => setLine(i, { qty: e.target.value })}
+                  />
+                </div>
                 <button
                   className="btn btn-quiet"
                   style={{ alignSelf: 'flex-end' }}
@@ -491,19 +544,21 @@ function NewRequestModal({ locations, profile, onClose, onSaved }) {
                 >
                   Remove
                 </button>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         ))}
       </div>
 
-      <button
-        className="btn"
-        style={{ marginTop: 10 }}
-        onClick={() => setLines([...lines, { name: '', sku: '', qty: 1 }])}
-      >
-        Add another item
-      </button>
+      {manual && (
+        <button
+          className="btn"
+          style={{ marginTop: 10 }}
+          onClick={() => setLines([...lines, { name: '', sku: '', qty: 1, variant_id: null }])}
+        >
+          Add another item by hand
+        </button>
+      )}
 
       <div className="field" style={{ marginTop: 16, marginBottom: 0 }}>
         <label htmlFor="rq-note">Note (optional)</label>
@@ -572,6 +627,7 @@ function FulfilModal({ request, locations, profile, onClose, onSaved }) {
         org_id: profile.org_id,
         order_id: order.id,
         request_line_id: line.id,
+        variant_id: line.variant_id ?? null,
         name: line.name,
         sku: line.sku,
         qty_sent: q,
