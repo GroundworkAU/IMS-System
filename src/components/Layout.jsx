@@ -9,7 +9,6 @@ const NAV = [
     group: 'Purchasing',
     items: [
       { to: '/purchase-orders', label: 'Purchase Orders' },
-      { to: '/suppliers', label: 'Suppliers & Brands' },
       { to: '/products', label: 'Products' },
     ],
   },
@@ -33,6 +32,7 @@ const NAV = [
   {
     group: 'Admin',
     items: [
+      { to: '/suppliers', label: 'Suppliers & Brands' },
       { to: '/admin', label: 'Users' },
       { to: '/settings', label: 'Integrations' },
     ],
