@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/Modal'
-import CatalogueBrowser from '../components/CatalogueBrowser'
 
 const formatDate = (d) =>
   d ? new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'
@@ -11,13 +11,13 @@ const ref = (prefix) => `${prefix}-${Date.now().toString(36).toUpperCase()}`
 
 export default function Restocks() {
   const { profile, org } = useAuth()
+  const navigate = useNavigate()
   const [tab, setTab] = useState('requests')
   const [requests, setRequests] = useState([])
   const [orders, setOrders] = useState([])
   const [locations, setLocations] = useState([])
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState(null)
-  const [creating, setCreating] = useState(false)
   const [fulfilling, setFulfilling] = useState(null)
   const [receiving, setReceiving] = useState(null)
 
@@ -152,7 +152,7 @@ export default function Restocks() {
               </button>
             ))}
           </div>
-          <button className="btn btn-primary" onClick={() => setCreating(true)}>
+          <button className="btn btn-primary" onClick={() => navigate('/restocks/new')}>
             New request
           </button>
         </div>
@@ -311,19 +311,6 @@ export default function Restocks() {
         )}
       </div>
 
-      {creating && (
-        <NewRequestModal
-          locations={locations}
-          profile={profile}
-          onClose={() => setCreating(false)}
-          onSaved={() => {
-            setCreating(false)
-            setStatus({ type: 'ok', text: 'Restock request raised.' })
-            load()
-          }}
-        />
-      )}
-
       {fulfilling && (
         <FulfilModal
           request={fulfilling}
@@ -372,212 +359,6 @@ function StatusPill({ status }) {
   }
   const [tone, label] = map[status] ?? ['neutral', status]
   return <span className={`status-pill ${tone}`}>{label}</span>
-}
-
-// ---------------------------------------------------------------------------
-// Raise a request
-// ---------------------------------------------------------------------------
-function NewRequestModal({ locations, profile, onClose, onSaved }) {
-  const [destination, setDestination] = useState('')
-  const [note, setNote] = useState('')
-  const [lines, setLines] = useState([])
-  const [manual, setManual] = useState(false)
-  const [picked, setPicked] = useState({})   // { variantId: {name, sku, qty} }
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState(null)
-
-  const setLine = (i, patch) =>
-    setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)))
-
-  async function save() {
-    if (!destination) return setError('Choose where the stock is needed.')
-
-    const fromCatalogue = Object.entries(picked).map(([variantId, v]) => ({
-      variant_id: variantId,
-      name: v.name,
-      sku: v.sku,
-      qty: v.qty,
-    }))
-    const manualLines = lines.filter((l) => l.name.trim() && Number(l.qty) > 0)
-    const clean = [...fromCatalogue, ...manualLines]
-
-    if (clean.length === 0) return setError('Add at least one item with a quantity.')
-
-    setBusy(true)
-    setError(null)
-
-    const { data: created, error: rErr } = await supabase
-      .from('restock_requests')
-      .insert({
-        org_id: profile.org_id,
-        reference: ref('REQ'),
-        destination_location_id: destination,
-        note: note.trim() || null,
-        requested_by: profile.id,
-      })
-      .select('id')
-      .single()
-
-    if (rErr) { setBusy(false); return setError(rErr.message) }
-
-    const { error: lErr } = await supabase.from('restock_request_lines').insert(
-      clean.map((l) => ({
-        org_id: profile.org_id,
-        request_id: created.id,
-        variant_id: l.variant_id ?? null,
-        name: l.name.trim(),
-        sku: (l.sku || '').trim() || null,
-        qty_requested: Number(l.qty),
-      }))
-    )
-
-    setBusy(false)
-    if (lErr) setError(lErr.message)
-    else onSaved()
-  }
-
-  return (
-    <Modal
-      title="New restock request"
-      onClose={onClose}
-      footer={
-        <>
-          <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={save} disabled={busy}>
-            {busy ? 'Saving...' : 'Raise request'}
-          </button>
-        </>
-      }
-    >
-      <div className="field">
-        <label htmlFor="rq-dest">Stock needed at</label>
-        <select
-          id="rq-dest"
-          className="input"
-          value={destination}
-          onChange={(e) => setDestination(e.target.value)}
-        >
-          <option value="">Choose a location...</option>
-          {locations.map((l) => (
-            <option key={l.id} value={l.id}>{l.name}</option>
-          ))}
-        </select>
-      </div>
-
-      <h4 className="sub-label">What do you need?</h4>
-
-      <CatalogueBrowser
-        selected={picked}
-        onChange={setPicked}
-        destinationId={destination || null}
-      />
-
-      <p className="field-hint">
-        Not in the catalogue yet?{' '}
-        <button className="linklike" onClick={() => {
-          setManual(true)
-          setLines([...lines, { name: '', sku: '', qty: 1, variant_id: null }])
-        }}>
-          Add an item by hand
-        </button>
-      </p>
-
-      <div className="line-picker" style={{ marginTop: 12 }}>
-        {lines.map((l, i) => (
-          <div key={i} className="line-row selected">
-            {l.variant_id ? (
-              <div className="line-row-head">
-                <span>
-                  <span className="cell-strong">{l.name}</span>
-                  <span className="cell-sub">{l.sku || 'No SKU'}</span>
-                </span>
-                <span style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-                  <label style={{ fontSize: 11.5, color: 'var(--muted)', fontWeight: 600 }}>
-                    Qty
-                    <input
-                      className="input mini"
-                      type="number"
-                      min="1"
-                      value={l.qty}
-                      onChange={(e) => setLine(i, { qty: e.target.value })}
-                      style={{ marginTop: 4 }}
-                    />
-                  </label>
-                  <button
-                    className="btn btn-quiet"
-                    onClick={() => setLines(lines.filter((_, idx) => idx !== i))}
-                  >
-                    Remove
-                  </button>
-                </span>
-              </div>
-            ) : (
-              <div className="form-row">
-                <div className="field" style={{ flex: '2 1 180px', marginBottom: 0 }}>
-                  <label>Product</label>
-                  <input
-                    className="input"
-                    placeholder="e.g. Home Guernsey 2026"
-                    value={l.name}
-                    onChange={(e) => setLine(i, { name: e.target.value })}
-                  />
-                </div>
-                <div className="field" style={{ flex: '1 1 110px', marginBottom: 0 }}>
-                  <label>SKU</label>
-                  <input
-                    className="input"
-                    value={l.sku}
-                    onChange={(e) => setLine(i, { sku: e.target.value })}
-                  />
-                </div>
-                <div className="field" style={{ flex: '0 1 80px', marginBottom: 0 }}>
-                  <label>Qty</label>
-                  <input
-                    className="input"
-                    type="number"
-                    min="1"
-                    value={l.qty}
-                    onChange={(e) => setLine(i, { qty: e.target.value })}
-                  />
-                </div>
-                <button
-                  className="btn btn-quiet"
-                  style={{ alignSelf: 'flex-end' }}
-                  onClick={() => setLines(lines.filter((_, idx) => idx !== i))}
-                >
-                  Remove
-                </button>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {manual && (
-        <button
-          className="btn"
-          style={{ marginTop: 10 }}
-          onClick={() => setLines([...lines, { name: '', sku: '', qty: 1, variant_id: null }])}
-        >
-          Add another item by hand
-        </button>
-      )}
-
-      <div className="field" style={{ marginTop: 16, marginBottom: 0 }}>
-        <label htmlFor="rq-note">Note (optional)</label>
-        <textarea
-          id="rq-note"
-          className="input"
-          rows="2"
-          placeholder="e.g. needed before the home game"
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-        />
-      </div>
-
-      {error && <div className="auth-msg err">{error}</div>}
-    </Modal>
-  )
 }
 
 // ---------------------------------------------------------------------------

@@ -647,3 +647,19 @@ a.btn { display: inline-block; text-decoration: none; }
 .browse-variant-main .cell-strong, .browse-variant-main .cell-sub { display: block; }
 .browse-stock { display: flex; flex-direction: column; gap: 2px; text-align: right; flex: none; }
 .browse-variant .input.mini { flex: none; width: 70px; }
+
+/* ---------- Full page request builder ---------- */
+.request-layout { display: grid; grid-template-columns: 1fr 340px; gap: 16px; align-items: start; }
+.request-side { position: sticky; top: 88px; }
+.request-actions {
+  display: flex; gap: 8px; justify-content: flex-end;
+  margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--blush);
+}
+.request-side .item-line { align-items: center; }
+
+@media (max-width: 900px) {
+  .request-layout { grid-template-columns: 1fr; }
+  .request-side { position: static; }
+}
+
+.browse-tall { max-height: 620px; }

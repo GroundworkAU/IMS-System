@@ -7,20 +7,23 @@ const SELECT = `id, name, external_brand, image_url,
 
 // Browse the catalogue with stock on hand, and set quantities per variant.
 // `selected` is { [variantId]: { name, sku, qty } } owned by the parent.
-export default function CatalogueBrowser({ selected, onChange, destinationId }) {
+export default function CatalogueBrowser({ selected, onChange, destinationId, fullHeight }) {
   const [products, setProducts] = useState([])
   const [brands, setBrands] = useState([])
   const [query, setQuery] = useState('')
   const [brand, setBrand] = useState('')
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const [expanded, setExpanded] = useState(new Set())
 
   const load = useCallback(async (search, brandVal) => {
     setLoading(true)
-    let q = supabase.from(  'products').select(SELECT).order('name').limit(60)
+    let q = supabase.from('products').select(SELECT).order('name').limit(60)
     if (search?.trim()) q = q.ilike('name', `%${search.trim()}%`)
     if (brandVal) q = q.eq('external_brand', brandVal)
-    const { data } = await q
+    const { data, error: qErr } = await q
+    if (qErr) setError(qErr.message)
+    else setError(null)
     setProducts(data ?? [])
     setLoading(false)
   }, [])
@@ -103,6 +106,12 @@ export default function CatalogueBrowser({ selected, onChange, destinationId }) 
         </div>
       </div>
 
+      {error && (
+        <div className="auth-msg err" style={{ marginBottom: 12 }}>
+          Could not load the catalogue: {error}
+        </div>
+      )}
+
       {loading ? (
         <p className="field-hint">Loading catalogue...</p>
       ) : products.length === 0 ? (
@@ -110,7 +119,7 @@ export default function CatalogueBrowser({ selected, onChange, destinationId }) 
           Nothing found. Sync products on the Products page, or add an item by hand below.
         </p>
       ) : (
-        <div className="product-list browse-list">
+        <div className={'product-list browse-list' + (fullHeight ? ' browse-tall' : '')}>
           {products.map((p) => {
             const isOpen = expanded.has(p.id)
             const picked = (p.variants ?? []).filter((v) => selected[v.id]).length
