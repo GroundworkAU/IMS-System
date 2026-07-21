@@ -386,6 +386,105 @@ async function checkRefundsForOpenReturns(sb, orgId, creds) {
   return { checked, closed, error: problems.length ? problems[0] : null }
 }
 
+// ---------------------------------------------------------------------------
+// Product catalogue sync. Pulls products with their variants and upserts them,
+// keyed on the platform's own ids so repeat syncs update rather than duplicate.
+// ---------------------------------------------------------------------------
+async function syncBigCommerceProducts(sb, orgId, creds) {
+  const problems = []
+
+  // Brand names, so products read properly in the app.
+  const brandNames = {}
+  try {
+    let bPage = 1
+    while (bPage <= 4) {
+      const body = await bcFetch(creds, `/v3/catalog/brands?limit=250&page=${bPage}`)
+      const list = body?.data ?? []
+      for (const b of list) brandNames[b.id] = b.name
+      if (list.length < 250) break
+      bPage += 1
+    }
+  } catch (err) {
+    problems.push(`Could not read brands: ${err.message}`)
+  }
+
+  let page = 1
+  let products = 0
+  let variants = 0
+  const now = new Date().toISOString()
+
+  while (page <= 20) {
+    const body = await bcFetch(
+      creds,
+      `/v3/catalog/products?limit=100&page=${page}&include=variants,primary_image`
+    )
+    const list = body?.data ?? []
+    if (list.length === 0) break
+
+    for (const p of list) {
+      const { data: prod, error: pErr } = await sb
+        .from('products')
+        .upsert(
+          {
+            org_id: orgId,
+            external_source: 'bigcommerce',
+            external_id: String(p.id),
+            name: p.name,
+            description: p.description ? String(p.description).replace(/<[^>]*>/g, '').slice(0, 2000) : null,
+            external_brand: p.brand_id ? (brandNames[p.brand_id] ?? null) : null,
+            image_url: p.primary_image?.url_thumbnail ?? null,
+            status: p.is_visible === false ? 'draft' : 'active',
+            last_synced_at: now,
+          },
+          { onConflict: 'org_id,external_source,external_id' }
+        )
+        .select('id')
+        .single()
+
+      if (pErr) {
+        if (problems.length < 3) problems.push(pErr.message)
+        continue
+      }
+      products += 1
+
+      // BigCommerce always returns at least one variant per product.
+      const vs = Array.isArray(p.variants) && p.variants.length
+        ? p.variants
+        : [{ id: `${p.id}-base`, sku: p.sku, price: p.price, cost_price: p.cost_price }]
+
+      const rows = vs.map((v) => ({
+        org_id: orgId,
+        product_id: prod.id,
+        external_source: 'bigcommerce',
+        external_id: String(v.id),
+        sku: v.sku || null,
+        option_name: Array.isArray(v.option_values)
+          ? v.option_values.map((o) => o.label).join(' / ') || null
+          : null,
+        barcode: v.upc || v.gtin || null,
+        unit_cost: Number(v.cost_price ?? p.cost_price ?? 0),
+        retail_price: Number(v.price ?? p.price ?? 0),
+        last_synced_at: now,
+      }))
+
+      const { error: vErr } = await sb
+        .from('variants')
+        .upsert(rows, { onConflict: 'org_id,external_source,external_id' })
+
+      if (vErr) {
+        if (problems.length < 3) problems.push(vErr.message)
+      } else {
+        variants += rows.length
+      }
+    }
+
+    if (list.length < 100) break
+    page += 1
+  }
+
+  return { products, variants, error: problems.length ? problems[0] : null }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
@@ -520,7 +619,10 @@ export default async function handler(req, res) {
     }
 
     // --- sync orders from the platform -------------------------------------
-    if (action === 'sync_orders' || action === 'order_lines' || action === 'check_refunds') {
+    if (
+      action === 'sync_orders' || action === 'order_lines' ||
+      action === 'check_refunds' || action === 'sync_products'
+    ) {
       const { data: secret } = await sb
         .from('integration_secrets')
         .select('credentials')
@@ -533,6 +635,10 @@ export default async function handler(req, res) {
       }
 
       try {
+        if (action === 'sync_products') {
+          const out = await syncBigCommerceProducts(sb, orgId, secret.credentials)
+          return res.status(200).json({ ok: !out.error, ...out })
+        }
         if (action === 'check_refunds') {
           const out = await checkRefundsForOpenReturns(sb, orgId, secret.credentials)
           return res.status(200).json({ ok: !out.error, ...out })

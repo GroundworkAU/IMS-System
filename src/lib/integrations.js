@@ -101,3 +101,8 @@ export async function loadOrderLines(orderId, provider = 'bigcommerce') {
 export async function checkRefunds(provider = 'bigcommerce') {
   return callIntegrations({ action: 'check_refunds', provider })
 }
+
+// Pull the product catalogue from a connected platform.
+export async function syncProducts(provider = 'bigcommerce') {
+  return callIntegrations({ action: 'sync_products', provider })
+}

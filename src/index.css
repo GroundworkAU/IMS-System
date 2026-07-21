@@ -595,3 +595,9 @@ a.btn { display: inline-block; text-decoration: none; }
 .order-link:hover { color: var(--dark-brown); }
 
 .item-qty-bad { background: #f7e2de; border-color: #eec9c1; color: var(--red); }
+
+.thumb {
+  width: 40px; height: 40px; object-fit: cover;
+  border-radius: 6px; border: 1px solid var(--blush); display: block;
+}
+.thumb-blank { background: var(--cream); }
