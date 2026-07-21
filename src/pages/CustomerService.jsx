@@ -34,6 +34,9 @@ export default function CustomerService() {
   const [managingReasons, setManagingReasons] = useState(false)
   const [resolving, setResolving] = useState(null)
   const [editing, setEditing] = useState(null)
+  const [openReturns, setOpenReturns] = useState(0)
+  const [attention, setAttention] = useState([])
+  const [issueOrderIds, setIssueOrderIds] = useState(new Set())
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -53,6 +56,28 @@ export default function CustomerService() {
     if (i.error) setStatus({ type: 'err', text: i.error.message })
     setIssues(i.data ?? [])
     setReasons(r.data ?? [])
+
+    // ---- overview -------------------------------------------------------
+    const threeDaysAgo = new Date(Date.now() - 3 * 86400000).toISOString()
+
+    const [ret, unfulfilled, openIssueOrders] = await Promise.all([
+      supabase.from('returns')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'open'),
+      // Anything still waiting, placed three or more days ago.
+      supabase.from('orders')
+        .select('id, order_number, status, order_date, total, customers(first_name, last_name, email)')
+        .not('status', 'in', '("Shipped","Completed","Cancelled","Declined","Refunded","Partially Refunded","Disputed","Incomplete")')
+        .lte('order_date', threeDaysAgo)
+        .order('order_date', { ascending: true })
+        .limit(50),
+      supabase.from('order_issues').select('order_id').eq('status', 'open'),
+    ])
+
+    setOpenReturns(ret.count ?? 0)
+    setAttention(unfulfilled.data ?? [])
+    setIssueOrderIds(new Set((openIssueOrders.data ?? []).map((o) => o.order_id).filter(Boolean)))
+
     setLoading(false)
   }, [])
 
@@ -109,6 +134,68 @@ export default function CustomerService() {
       {status && (
         <div className={'auth-msg ' + (status.type === 'ok' ? 'ok' : 'err')} style={{ marginBottom: 16 }}>
           {status.text}
+        </div>
+      )}
+
+      <div className="grid grid-3" style={{ marginBottom: 16 }}>
+        <div className="card">
+          <div className="stat-label">Open returns</div>
+          <div className="stat-value">{openReturns}</div>
+          <div className="stat-note">Logged but not yet refunded</div>
+        </div>
+        <div className="card">
+          <div className="stat-label">Open order issues</div>
+          <div className="stat-value">{openIssues.length}</div>
+          <div className="stat-note">Raised and waiting on someone</div>
+        </div>
+        <div className="card">
+          <div className="stat-label">Waiting 3+ days</div>
+          <div className="stat-value">{attention.length}</div>
+          <div className="stat-note">Orders placed but not yet shipped</div>
+        </div>
+      </div>
+
+      {attention.length > 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h3 className="section-title">Needs attention</h3>
+          <p className="page-desc" style={{ marginBottom: 14 }}>
+            Orders placed three or more days ago that have not shipped, oldest first.
+          </p>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr><th>Order</th><th>Customer</th><th>Placed</th><th>Waiting</th><th>Status</th></tr>
+              </thead>
+              <tbody>
+                {attention.map((o) => {
+                  const days = Math.floor((Date.now() - new Date(o.order_date)) / 86400000)
+                  return (
+                    <tr key={o.id}>
+                      <td>
+                        <span className="cell-strong">#{o.order_number}</span>
+                        {issueOrderIds.has(o.id) && (
+                          <span className="flag-pill" title="An issue has been raised on this order">
+                            Issue
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        {[o.customers?.first_name, o.customers?.last_name].filter(Boolean).join(' ')
+                          || o.customers?.email || 'Guest'}
+                      </td>
+                      <td>{formatDate(o.order_date)}</td>
+                      <td>
+                        <span className={days >= 7 ? 'days-bad' : 'days-warn'}>
+                          {days} day{days === 1 ? '' : 's'}
+                        </span>
+                      </td>
+                      <td><span className="status-pill warn">{o.status}</span></td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

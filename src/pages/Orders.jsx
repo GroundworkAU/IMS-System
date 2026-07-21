@@ -38,6 +38,7 @@ export default function Orders() {
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [statusOptions, setStatusOptions] = useState([])
+  const [issueOrderIds, setIssueOrderIds] = useState(new Set())
 
   const connected = (org?.platforms ?? []).includes('bigcommerce')
 
@@ -63,9 +64,13 @@ export default function Orders() {
     if (from) q = q.gte('order_date', new Date(`${from}T00:00:00`).toISOString())
     if (to) q = q.lte('order_date', new Date(`${to}T23:59:59`).toISOString())
 
-    const { data, error } = await q
+    const [{ data, error }, issues] = await Promise.all([
+      q,
+      supabase.from('order_issues').select('order_id').eq('status', 'open'),
+    ])
     if (error) setStatus({ type: 'err', text: error.message })
     setOrders(data ?? [])
+    setIssueOrderIds(new Set((issues.data ?? []).map((i) => i.order_id).filter(Boolean)))
     setLoading(false)
   }, [query, statusFilter, fromDate, toDate])
 
@@ -250,7 +255,14 @@ export default function Orders() {
               <tbody>
                 {orders.map((o) => (
                   <tr key={o.id}>
-                    <td className="cell-strong">#{o.order_number}</td>
+                    <td>
+                      <span className="cell-strong">#{o.order_number}</span>
+                      {issueOrderIds.has(o.id) && (
+                        <span className="flag-pill" title="An issue has been raised on this order">
+                          Issue
+                        </span>
+                      )}
+                    </td>
                     <td>
                       <div>{customerName(o)}</div>
                       {o.customers?.email && <div className="cell-sub">{o.customers.email}</div>}
