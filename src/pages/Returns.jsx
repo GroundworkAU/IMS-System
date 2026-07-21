@@ -169,97 +169,103 @@ export default function Returns() {
             </p>
           </div>
         ) : (
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Order</th><th>Customer</th><th>Items returned</th>
-                  <th>Returned</th><th>Logged</th><th>Reason</th>
-                  <th>Status</th><th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {returns.map((r) => {
-                  const link = adminLink(r)
-                  return (
-                    <tr key={r.id}>
-                      <td className="cell-strong">
-                        {r.order_number ? `#${r.order_number}` : '-'}
-                      </td>
-                      <td>{customerName(r)}</td>
-                      <td>
-                        {(r.return_lines ?? []).length === 0 ? (
-                          <span className="cell-sub">-</span>
-                        ) : (
-                          <div className="item-list">
-                            {r.return_lines.map((l) => (
-                              <div key={l.id} className="item-line">
-                                <span className="item-qty">{l.qty}</span>
-                                <span>
-                                  <span className="item-name">
-                                    {l.order_lines?.name || 'Item'}
-                                  </span>
-                                  <span className="cell-sub">
-                                    {l.order_lines?.sku || 'No SKU'}
-                                    {l.condition ? ` · ${l.condition}` : ''}
-                                  </span>
+          <div className="return-list">
+            {returns.map((r) => {
+              const link = adminLink(r)
+              return (
+                <article key={r.id} className="return-card">
+                  <header className="return-card-head">
+                    <div className="return-ident">
+                      <span className="return-order">
+                        {r.order_number ? `#${r.order_number}` : 'No order'}
+                      </span>
+                      <span className="return-customer">{customerName(r)}</span>
+                    </div>
+
+                    <div className="return-card-actions">
+                      {r.status === 'refunded' ? (
+                        <span
+                          className="status-pill ok"
+                          title={
+                            r.refund_source === 'platform'
+                              ? 'Found on the sales platform'
+                              : 'Marked by a team member'
+                          }
+                        >
+                          Refunded
+                        </span>
+                      ) : r.status === 'cancelled' ? (
+                        <span className="status-pill neutral">Cancelled</span>
+                      ) : (
+                        <span className="status-pill warn">Open</span>
+                      )}
+
+                      {r.status === 'open' ? (
+                        <>
+                          {link && (
+                            <a className="btn" href={link} target="_blank" rel="noreferrer">
+                              Refund order
+                            </a>
+                          )}
+                          <button className="btn btn-quiet" onClick={() => markRefunded(r)}>
+                            Mark refunded
+                          </button>
+                        </>
+                      ) : (
+                        <button className="btn btn-quiet" onClick={() => reopen(r)}>Reopen</button>
+                      )}
+                      <button className="btn" onClick={() => setViewing(r)}>View</button>
+                    </div>
+                  </header>
+
+                  <div className="return-card-body">
+                    <dl className="return-facts">
+                      <div>
+                        <dt>Returned</dt>
+                        <dd>{formatDate(r.return_date)}</dd>
+                      </div>
+                      <div>
+                        <dt>Returned to</dt>
+                        <dd>{r.locations?.name || '-'}</dd>
+                      </div>
+                      <div>
+                        <dt>Logged</dt>
+                        <dd>
+                          {formatDate(r.created_at)}
+                          <span className="cell-sub">by {r.profiles?.full_name || 'Unknown'}</span>
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Reason</dt>
+                        <dd>{r.reason || '-'}</dd>
+                      </div>
+                    </dl>
+
+                    <div className="return-items">
+                      <span className="panel-label">Items returned</span>
+                      {(r.return_lines ?? []).length === 0 ? (
+                        <p className="cell-sub" style={{ marginTop: 8 }}>Nothing recorded.</p>
+                      ) : (
+                        <div className="item-list">
+                          {r.return_lines.map((l) => (
+                            <div key={l.id} className="item-line">
+                              <span className="item-qty">{l.qty}</span>
+                              <span>
+                                <span className="item-name">{l.order_lines?.name || 'Item'}</span>
+                                <span className="cell-sub">
+                                  {l.order_lines?.sku || 'No SKU'}
+                                  {l.condition ? ` \u00b7 ${l.condition}` : ''}
                                 </span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </td>
-                      <td>{formatDate(r.return_date)}</td>
-                      <td>
-                        <div>{formatDate(r.created_at)}</div>
-                        <div className="cell-sub">by {r.profiles?.full_name || 'Unknown'}</div>
-                      </td>
-                      <td>{r.reason || '-'}</td>
-                      <td>
-                        {r.status === 'refunded' ? (
-                          <span
-                            className="status-pill ok"
-                            title={
-                              r.refund_source === 'platform'
-                                ? 'Detected automatically from the sales platform'
-                                : 'Marked by a team member'
-                            }
-                          >
-                            Refunded
-                          </span>
-                        ) : r.status === 'cancelled' ? (
-                          <span className="status-pill neutral">Cancelled</span>
-                        ) : (
-                          <span className="status-pill warn">Open</span>
-                        )}
-                      </td>
-                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                        {r.status === 'open' ? (
-                          <>
-                            {link && (
-                              <a
-                                className="btn"
-                                href={link}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                Refund order
-                              </a>
-                            )}{' '}
-                            <button className="btn btn-quiet" onClick={() => markRefunded(r)}>
-                              Mark refunded
-                            </button>{' '}
-                          </>
-                        ) : (
-                          <button className="btn btn-quiet" onClick={() => reopen(r)}>Reopen</button>
-                        )}{' '}
-                        <button className="btn" onClick={() => setViewing(r)}>View</button>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </article>
+              )
+            })}
           </div>
         )}
       </div>
