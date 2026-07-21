@@ -172,9 +172,8 @@ export default function Returns() {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Order</th><th>Customer</th><th>Order date</th>
-                  <th>Returned</th><th>Logged</th><th>Reason</th>
-                  <th>Logged by</th><th>Status</th><th></th>
+                  <th>Order</th><th>Customer</th><th>Returned</th>
+                  <th>Logged</th><th>Reason</th><th>Status</th><th></th>
                 </tr>
               </thead>
               <tbody>
@@ -182,18 +181,16 @@ export default function Returns() {
                   const link = adminLink(r)
                   return (
                     <tr key={r.id}>
-                      <td>
-                        <div className="cell-strong">
-                          {r.order_number ? `#${r.order_number}` : '-'}
-                        </div>
-                        <div className="cell-sub">{r.rma_number}</div>
+                      <td className="cell-strong">
+                        {r.order_number ? `#${r.order_number}` : '-'}
                       </td>
                       <td>{customerName(r)}</td>
-                      <td>{formatDate(r.orders?.order_date)}</td>
                       <td>{formatDate(r.return_date)}</td>
-                      <td>{formatDate(r.created_at)}</td>
+                      <td>
+                        <div>{formatDate(r.created_at)}</div>
+                        <div className="cell-sub">by {r.profiles?.full_name || 'Unknown'}</div>
+                      </td>
                       <td>{r.reason || '-'}</td>
-                      <td>{r.profiles?.full_name || '-'}</td>
                       <td>
                         {r.status === 'refunded' ? (
                           <span
