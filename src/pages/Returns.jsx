@@ -38,6 +38,7 @@ export default function Returns() {
   const [reasons, setReasons] = useState([])
   const [managingReasons, setManagingReasons] = useState(false)
   const [tab, setTab] = useState('open')
+  const [editing, setEditing] = useState(null)
   const [checking, setChecking] = useState(false)
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState(null)
@@ -73,6 +74,27 @@ export default function Returns() {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  // Admins can tidy anything; everyone else only what they logged.
+  const canManage = (r) => isAdmin || r.profiles?.full_name === profile?.full_name
+
+  async function removeReturn(r) {
+    if (!window.confirm(
+      `Delete this return for order ${r.order_number ? '#' + r.order_number : ''}? This cannot be undone.`
+    )) return
+    const { error } = await supabase.from('returns').delete().eq('id', r.id)
+    if (error) {
+      setStatus({
+        type: 'err',
+        text: error.message.includes('policy')
+          ? 'You can only delete returns you logged. Ask an owner or admin.'
+          : error.message,
+      })
+    } else {
+      setStatus({ type: 'ok', text: 'Return deleted.' })
+      load()
+    }
+  }
 
   async function markRefunded(r) {
     const { error } = await supabase
@@ -250,6 +272,12 @@ export default function Returns() {
                       ) : (
                         <button className="btn btn-quiet" onClick={() => reopen(r)}>Reopen</button>
                       )}
+                      <button className="btn" onClick={() => setEditing(r)}>Edit</button>
+                      {canManage(r) && (
+                        <button className="btn btn-quiet" onClick={() => removeReturn(r)}>
+                          Delete
+                        </button>
+                      )}
                       <button className="btn" onClick={() => setViewing(r)}>View</button>
                     </div>
                   </header>
@@ -313,6 +341,20 @@ export default function Returns() {
           profile={profile}
           onClose={() => setCreating(false)}
           onSaved={() => { setCreating(false); setStatus({ type: 'ok', text: 'Return logged.' }); load() }}
+        />
+      )}
+
+      {editing && (
+        <EditReturnModal
+          ret={editing}
+          locations={locations}
+          reasons={reasons.filter((r) => r.is_active)}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null)
+            setStatus({ type: 'ok', text: 'Return updated.' })
+            load()
+          }}
         />
       )}
 
@@ -811,6 +853,175 @@ function ReasonsModal({ reasons, profile, onClose, onChanged }) {
           Add
         </button>
       </div>
+
+      {error && <div className="auth-msg err">{error}</div>}
+    </Modal>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Edit a return after the fact: dates, where it went, why, and the items.
+// ---------------------------------------------------------------------------
+function EditReturnModal({ ret, locations, reasons, onClose, onSaved }) {
+  const [returnDate, setReturnDate] = useState(ret.return_date ?? '')
+  const [locationId, setLocationId] = useState(ret.returned_to_location_id ?? '')
+  const [reason, setReason] = useState(ret.reason ?? '')
+  const [lines, setLines] = useState(ret.return_lines ?? [])
+  const [removed, setRemoved] = useState([])
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  // The stored reason may include a free text note, so keep it selectable even
+  // if it is no longer in the managed list.
+  const knownReason = reasons.some((r) => r.label === reason)
+
+  function updateLine(id, patch) {
+    setLines((ls) => ls.map((l) => (l.id === id ? { ...l, ...patch } : l)))
+  }
+
+  function dropLine(id) {
+    setLines((ls) => ls.filter((l) => l.id !== id))
+    setRemoved((r) => [...r, id])
+  }
+
+  async function save() {
+    if (!locationId) return setError('Say where the return came back to.')
+    if (lines.length === 0) return setError('A return needs at least one item.')
+
+    setBusy(true)
+    setError(null)
+
+    const { error: rErr } = await supabase
+      .from('returns')
+      .update({
+        return_date: returnDate,
+        returned_to_location_id: locationId,
+        reason,
+      })
+      .eq('id', ret.id)
+
+    if (rErr) { setBusy(false); return setError(rErr.message) }
+
+    for (const l of lines) {
+      const { error: lErr } = await supabase
+        .from('return_lines')
+        .update({ qty: Number(l.qty) || 1, condition: l.condition })
+        .eq('id', l.id)
+      if (lErr) { setBusy(false); return setError(lErr.message) }
+    }
+
+    if (removed.length > 0) {
+      const { error: dErr } = await supabase.from('return_lines').delete().in('id', removed)
+      if (dErr) { setBusy(false); return setError(dErr.message) }
+    }
+
+    setBusy(false)
+    onSaved()
+  }
+
+  return (
+    <Modal
+      title={`Edit ${ret.rma_number}`}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={save} disabled={busy}>
+            {busy ? 'Saving...' : 'Save changes'}
+          </button>
+        </>
+      }
+    >
+      <div className="chosen-order">
+        <strong>{ret.order_number ? `#${ret.order_number}` : 'No order'}</strong>
+        <span className="cell-sub">The order this return belongs to cannot be changed.</span>
+      </div>
+
+      <div className="form-row" style={{ marginTop: 16 }}>
+        <div className="field" style={{ flex: '1 1 200px' }}>
+          <label htmlFor="e-loc">Returned to</label>
+          <select
+            id="e-loc"
+            className="input"
+            value={locationId}
+            onChange={(e) => setLocationId(e.target.value)}
+          >
+            <option value="">Choose...</option>
+            {locations.map((l) => (
+              <option key={l.id} value={l.id}>{l.name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="field" style={{ flex: '1 1 150px' }}>
+          <label htmlFor="e-date">Date received</label>
+          <input
+            id="e-date"
+            className="input"
+            type="date"
+            value={returnDate}
+            onChange={(e) => setReturnDate(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="field">
+        <label htmlFor="e-reason">Reason</label>
+        <select
+          id="e-reason"
+          className="input"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+        >
+          {!knownReason && reason && <option value={reason}>{reason}</option>}
+          <option value="">Choose...</option>
+          {reasons.map((r) => (
+            <option key={r.id} value={r.label}>{r.label}</option>
+          ))}
+        </select>
+      </div>
+
+      <h4 className="sub-label">Items returned</h4>
+      {lines.length === 0 ? (
+        <p className="field-hint">All items removed. Add at least one back or cancel.</p>
+      ) : (
+        <div className="line-picker">
+          {lines.map((l) => (
+            <div key={l.id} className="line-row selected">
+              <div className="line-row-head">
+                <span>
+                  <span className="cell-strong">{l.order_lines?.name || 'Item'}</span>
+                  <span className="cell-sub">{l.order_lines?.sku || 'No SKU'}</span>
+                </span>
+                <button className="btn btn-quiet" onClick={() => dropLine(l.id)}>Remove</button>
+              </div>
+              <div className="line-controls">
+                <label>
+                  Qty
+                  <input
+                    className="input mini"
+                    type="number"
+                    min="1"
+                    value={l.qty}
+                    onChange={(e) => updateLine(l.id, { qty: e.target.value })}
+                  />
+                </label>
+                <label>
+                  Condition
+                  <select
+                    className="input mini"
+                    value={l.condition ?? 'resalable'}
+                    onChange={(e) => updateLine(l.id, { condition: e.target.value })}
+                  >
+                    {CONDITIONS.map((c) => (
+                      <option key={c.value} value={c.value}>{c.label}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {error && <div className="auth-msg err">{error}</div>}
     </Modal>

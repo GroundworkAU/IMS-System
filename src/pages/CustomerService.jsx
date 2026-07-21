@@ -33,6 +33,7 @@ export default function CustomerService() {
   const [creating, setCreating] = useState(false)
   const [managingReasons, setManagingReasons] = useState(false)
   const [resolving, setResolving] = useState(null)
+  const [editing, setEditing] = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -65,6 +66,24 @@ export default function CustomerService() {
     const c = i.orders?.customers
     if (!c) return 'Guest'
     return [c.first_name, c.last_name].filter(Boolean).join(' ') || c.email || 'Guest'
+  }
+
+  const canManage = (i) => isAdmin || i.raised?.full_name === profile?.full_name
+
+  async function removeIssue(i) {
+    if (!window.confirm(`Delete ${i.reference}? This cannot be undone.`)) return
+    const { error } = await supabase.from('order_issues').delete().eq('id', i.id)
+    if (error) {
+      setStatus({
+        type: 'err',
+        text: error.message.includes('policy')
+          ? 'You can only delete issues you raised. Ask an owner or admin.'
+          : error.message,
+      })
+    } else {
+      setStatus({ type: 'ok', text: 'Issue deleted.' })
+      load()
+    }
   }
 
   async function reopen(issue) {
@@ -176,6 +195,12 @@ export default function CustomerService() {
                     ) : (
                       <button className="btn btn-quiet" onClick={() => reopen(i)}>Reopen</button>
                     )}
+                    <button className="btn" onClick={() => setEditing(i)}>Edit</button>
+                    {canManage(i) && (
+                      <button className="btn btn-quiet" onClick={() => removeIssue(i)}>
+                        Delete
+                      </button>
+                    )}
                   </div>
                 </header>
 
@@ -263,6 +288,19 @@ export default function CustomerService() {
           onSaved={() => {
             setResolving(null)
             setStatus({ type: 'ok', text: 'Issue resolved.' })
+            load()
+          }}
+        />
+      )}
+
+      {editing && (
+        <EditIssueModal
+          issue={editing}
+          reasons={reasons.filter((r) => r.is_active)}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null)
+            setStatus({ type: 'ok', text: 'Issue updated.' })
             load()
           }}
         />
@@ -725,6 +763,147 @@ function IssueReasonsModal({ profile, initial, onClose, onChanged }) {
         />
         <span>This issue is about specific items</span>
       </label>
+
+      {error && <div className="auth-msg err">{error}</div>}
+    </Modal>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Edit an issue after the fact: reason, notes, and the affected items.
+// ---------------------------------------------------------------------------
+function EditIssueModal({ issue, reasons, onClose, onSaved }) {
+  const [reason, setReason] = useState(issue.reason ?? '')
+  const [detail, setDetail] = useState(issue.detail ?? '')
+  const [lines, setLines] = useState(issue.order_issue_lines ?? [])
+  const [removed, setRemoved] = useState([])
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  const knownReason = reasons.some((r) => r.label === reason)
+
+  function updateLine(id, patch) {
+    setLines((ls) => ls.map((l) => (l.id === id ? { ...l, ...patch } : l)))
+  }
+
+  function dropLine(id) {
+    setLines((ls) => ls.filter((l) => l.id !== id))
+    setRemoved((r) => [...r, id])
+  }
+
+  async function save() {
+    if (!reason) return setError('Choose what the issue is.')
+
+    setBusy(true)
+    setError(null)
+
+    const { error: iErr } = await supabase
+      .from('order_issues')
+      .update({ reason, detail: detail.trim() || null })
+      .eq('id', issue.id)
+
+    if (iErr) { setBusy(false); return setError(iErr.message) }
+
+    for (const l of lines) {
+      const { error: lErr } = await supabase
+        .from('order_issue_lines')
+        .update({ qty: l.qty ? Number(l.qty) : null, note: l.note?.trim() || null })
+        .eq('id', l.id)
+      if (lErr) { setBusy(false); return setError(lErr.message) }
+    }
+
+    if (removed.length > 0) {
+      const { error: dErr } = await supabase.from('order_issue_lines').delete().in('id', removed)
+      if (dErr) { setBusy(false); return setError(dErr.message) }
+    }
+
+    setBusy(false)
+    onSaved()
+  }
+
+  return (
+    <Modal
+      title={`Edit ${issue.reference}`}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={save} disabled={busy}>
+            {busy ? 'Saving...' : 'Save changes'}
+          </button>
+        </>
+      }
+    >
+      <div className="chosen-order">
+        <strong>{issue.order_number ? `#${issue.order_number}` : 'No order'}</strong>
+        <span className="cell-sub">The order this issue belongs to cannot be changed.</span>
+      </div>
+
+      <div className="field" style={{ marginTop: 16 }}>
+        <label htmlFor="ei-reason">What is the issue?</label>
+        <select
+          id="ei-reason"
+          className="input"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+        >
+          {!knownReason && reason && <option value={reason}>{reason}</option>}
+          <option value="">Choose...</option>
+          {reasons.map((r) => (
+            <option key={r.id} value={r.label}>{r.label}</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="field">
+        <label htmlFor="ei-detail">Notes</label>
+        <textarea
+          id="ei-detail"
+          className="input"
+          rows="3"
+          value={detail}
+          onChange={(e) => setDetail(e.target.value)}
+        />
+      </div>
+
+      {lines.length > 0 && (
+        <>
+          <h4 className="sub-label">Items affected</h4>
+          <div className="line-picker">
+            {lines.map((l) => (
+              <div key={l.id} className="line-row selected">
+                <div className="line-row-head">
+                  <span>
+                    <span className="cell-strong">{l.order_lines?.name || 'Item'}</span>
+                    <span className="cell-sub">{l.order_lines?.sku || 'No SKU'}</span>
+                  </span>
+                  <button className="btn btn-quiet" onClick={() => dropLine(l.id)}>Remove</button>
+                </div>
+                <div className="line-controls">
+                  <label>
+                    Qty
+                    <input
+                      className="input mini"
+                      type="number"
+                      min="1"
+                      value={l.qty ?? ''}
+                      onChange={(e) => updateLine(l.id, { qty: e.target.value })}
+                    />
+                  </label>
+                  <label style={{ flex: '1 1 160px' }}>
+                    Note
+                    <input
+                      className="input mini"
+                      value={l.note ?? ''}
+                      onChange={(e) => updateLine(l.id, { note: e.target.value })}
+                    />
+                  </label>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       {error && <div className="auth-msg err">{error}</div>}
     </Modal>

@@ -550,3 +550,8 @@ a.btn { display: inline-block; text-decoration: none; }
   .filter-field { flex: 1 1 100% !important; }
   .filter-actions { width: 100%; }
 }
+
+.line-row-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+}
+.line-row-head .cell-strong, .line-row-head .cell-sub { display: block; }
