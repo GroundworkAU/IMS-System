@@ -919,3 +919,10 @@ a.btn { display: inline-block; text-decoration: none; }
 }
 .back-link:hover { color: var(--deep-brown); }
 .back-link span { font-size: 18px; line-height: 1; }
+
+/* ---------- Repeated actions at the foot of a long page ---------- */
+.page-actions {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap; margin-top: 16px;
+}
+.page-actions-summary { display: flex; gap: 28px; flex-wrap: wrap; font-size: 13.5px; }

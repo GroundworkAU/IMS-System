@@ -421,6 +421,30 @@ export default function FulfilRequest() {
           })}
         </div>
       </div>
+
+      <div className="card page-actions">
+        <div className="page-actions-summary">
+          <span>
+            <span className="fact-label">Sending</span>
+            {linesSending} line{linesSending === 1 ? '' : 's'} · {totalSending} item
+            {totalSending === 1 ? '' : 's'}
+          </span>
+          <span>
+            <span className="fact-label">From</span>
+            {locations.find((l) => l.id === source)?.name || 'not chosen yet'}
+          </span>
+        </div>
+
+        <div className="request-bar-actions">
+          <button className="btn" onClick={() => navigate('/restocks')}>Cancel</button>
+          <button className="btn" onClick={saveDraft} disabled={saving || busy}>
+            {saving ? 'Saving...' : 'Save and finish later'}
+          </button>
+          <button className="btn btn-primary" onClick={confirm} disabled={busy || saving}>
+            {busy ? 'Creating...' : 'Create restock order'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
