@@ -10,6 +10,7 @@ export default function Join() {
 
   const [mode, setMode] = useState('create') // 'create' | 'signin'
   const [fullName, setFullName] = useState('')
+  const [jobTitle, setJobTitle] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [status, setStatus] = useState(null)
@@ -63,7 +64,9 @@ export default function Join() {
         setStatus({ type: 'err', text: 'Use a password of at least 8 characters.' })
         return
       }
-      const { data, error } = await signUp(email.trim(), password, fullName.trim())
+      const { data, error } = await signUp(
+        email.trim(), password, fullName.trim(), jobTitle.trim()
+      )
       setBusy(false)
       if (error) setStatus({ type: 'err', text: error.message })
       else if (!data.session) {
@@ -105,16 +108,29 @@ export default function Join() {
             </p>
 
             {mode === 'create' && (
-              <div className="field">
-                <label htmlFor="name">Full name</label>
-                <input
-                  id="name"
-                  className="input"
-                  autoComplete="name"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                />
-              </div>
+              <>
+                <div className="field">
+                  <label htmlFor="name">Full name</label>
+                  <input
+                    id="name"
+                    className="input"
+                    autoComplete="name"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="jobtitle">Job title or position</label>
+                  <input
+                    id="jobtitle"
+                    className="input"
+                    autoComplete="organization-title"
+                    placeholder="e.g. Warehouse Coordinator"
+                    value={jobTitle}
+                    onChange={(e) => setJobTitle(e.target.value)}
+                  />
+                </div>
+              </>
             )}
 
             <div className="field">

@@ -23,7 +23,7 @@ export function AuthProvider({ children }) {
     setProfileLoading(true)
     const { data: p } = await supabase
       .from('profiles')
-      .select('id, org_id, full_name, email, role, is_active')
+      .select('id, org_id, full_name, email, job_title, role, is_active')
       .eq('id', userId)
       .maybeSingle()
 
@@ -58,12 +58,12 @@ export function AuthProvider({ children }) {
   const signIn = (email, password) =>
     supabase.auth.signInWithPassword({ email, password })
 
-  const signUp = (email, password, fullName) =>
+  const signUp = (email, password, fullName, jobTitle) =>
     supabase.auth.signUp({
       email,
       password,
       options: {
-        data: { full_name: fullName },
+        data: { full_name: fullName, job_title: jobTitle },
         emailRedirectTo: window.location.origin,
       },
     })

@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 export default function Signup() {
   const { session, signUp } = useAuth()
   const [fullName, setFullName] = useState('')
+  const [jobTitle, setJobTitle] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [status, setStatus] = useState(null)
@@ -23,7 +24,9 @@ export default function Signup() {
     }
     setBusy(true)
     setStatus(null)
-    const { data, error } = await signUp(email.trim(), password, fullName.trim())
+    const { data, error } = await signUp(
+      email.trim(), password, fullName.trim(), jobTitle.trim()
+    )
     setBusy(false)
     if (error) {
       setStatus({ type: 'err', text: error.message })
@@ -59,6 +62,18 @@ export default function Signup() {
             autoComplete="name"
             value={fullName}
             onChange={(e) => setFullName(e.target.value)}
+          />
+        </div>
+
+        <div className="field">
+          <label htmlFor="jobtitle">Job title or position</label>
+          <input
+            id="jobtitle"
+            className="input"
+            autoComplete="organization-title"
+            placeholder="e.g. Ecommerce Manager"
+            value={jobTitle}
+            onChange={(e) => setJobTitle(e.target.value)}
           />
         </div>
 

@@ -2,7 +2,8 @@ import { useAuth } from '../context/AuthContext'
 
 export default function Dashboard() {
   const { profile, user } = useAuth()
-  const name = (profile?.full_name || user?.email || '').split('@')[0]
+  const firstName = profile?.full_name?.trim().split(/\s+/)[0]
+  const name = firstName || (user?.email || '').split('@')[0]
 
   return (
     <div>

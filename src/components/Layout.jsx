@@ -95,6 +95,7 @@ export default function Layout() {
   const [drawerOpen, setDrawerOpen] = useState(false)
 
   const email = user?.email ?? ''
+  const displayName = profile?.full_name || email
   const initials = (profile?.full_name || email || '?').trim().slice(0, 1).toUpperCase()
 
   return (
@@ -129,7 +130,10 @@ export default function Layout() {
         <header className="topbar">
           <h1>{titleFor(pathname)}</h1>
           <div className="user-chip">
-            <span>{profile?.full_name || email}</span>
+            <span className="user-meta">
+              <span className="user-name">{displayName}</span>
+              {profile?.job_title && <span className="user-role">{profile.job_title}</span>}
+            </span>
             <span className="avatar">{initials}</span>
             <button className="btn" onClick={signOut}>Sign out</button>
           </div>

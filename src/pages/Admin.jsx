@@ -26,7 +26,7 @@ export default function Admin() {
     setLoading(true)
     const [m, i, s] = await Promise.all([
       supabase.from('profiles')
-        .select('id, full_name, email, role, is_active')
+        .select('id, full_name, email, job_title, role, is_active')
         .eq('org_id', org.id)
         .order('created_at'),
       supabase.from('org_invitations')
@@ -206,12 +206,13 @@ export default function Admin() {
         ) : (
           <table className="table">
             <thead>
-              <tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th></tr>
+              <tr><th>Name</th><th>Position</th><th>Email</th><th>Access</th><th>Status</th></tr>
             </thead>
             <tbody>
               {members.map((m) => (
                 <tr key={m.id}>
                   <td>{m.full_name || '-'}</td>
+                  <td>{m.job_title || '-'}</td>
                   <td>{m.email || '-'}</td>
                   <td><span className="pill">{m.role}</span></td>
                   <td>{m.is_active ? 'Active' : 'Inactive'}</td>
