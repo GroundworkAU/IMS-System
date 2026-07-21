@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import BackLink from '../components/BackLink'
 import { nextReference } from '../lib/references'
 import { sortVariants } from '../lib/sizes'
+import Modal from '../components/Modal'
 
 export default function FulfilRequest() {
   const { requestId } = useParams()
@@ -23,6 +24,8 @@ export default function FulfilRequest() {
   const [busy, setBusy] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
+  const [askClose, setAskClose] = useState(null)   // { remaining }
+  const [closeReason, setCloseReason] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -247,7 +250,30 @@ export default function FulfilRequest() {
     setBusy(true)
     const id = await persist(true)
     setBusy(false)
-    if (id) navigate('/restocks')
+    if (!id) return
+
+    // Work out what this fulfilment leaves behind.
+    const remaining = lines.reduce((n, l) => {
+      const sending = Number(qty[l.id]) || 0
+      const already = l.qty_fulfilled ?? 0
+      return n + Math.max(0, l.qty_requested - already - sending)
+    }, 0)
+
+    if (remaining > 0) setAskClose({ remaining })
+    else navigate('/restocks')
+  }
+
+  async function closeRequest(reason) {
+    await supabase
+      .from('restock_requests')
+      .update({
+        status: 'closed',
+        closed_at: new Date().toISOString(),
+        closed_by: profile.id,
+        closed_reason: reason || null,
+      })
+      .eq('id', request.id)
+    navigate('/restocks')
   }
 
   if (loading) return <p className="page-desc">Loading request...</p>
@@ -421,6 +447,46 @@ export default function FulfilRequest() {
           })}
         </div>
       </div>
+
+      {askClose && (
+        <Modal
+          title="Anything else coming?"
+          onClose={() => navigate('/restocks')}
+          footer={
+            <>
+              <button className="btn" onClick={() => navigate('/restocks')}>
+                Leave it open
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => closeRequest(closeReason)}
+              >
+                Close the request
+              </button>
+            </>
+          }
+        >
+          <p className="page-desc" style={{ marginTop: 0 }}>
+            {askClose.remaining} item{askClose.remaining === 1 ? '' : 's'} from{' '}
+            {request.reference} {askClose.remaining === 1 ? 'is' : 'are'} still outstanding.
+          </p>
+          <p className="field-hint">
+            Leave it open if the rest will be sent later, perhaps from another location. Close it
+            if nothing more is coming ~ the request stays on record showing what was and was not
+            covered.
+          </p>
+          <div className="field" style={{ marginTop: 16, marginBottom: 0 }}>
+            <label htmlFor="close-reason">Why is nothing more coming? (optional)</label>
+            <input
+              id="close-reason"
+              className="input"
+              placeholder="e.g. out of stock everywhere, not needed now"
+              value={closeReason}
+              onChange={(e) => setCloseReason(e.target.value)}
+            />
+          </div>
+        </Modal>
+      )}
 
       <div className="card page-actions">
         <div className="page-actions-summary">

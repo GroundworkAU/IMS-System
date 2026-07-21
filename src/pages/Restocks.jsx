@@ -78,6 +78,36 @@ export default function Restocks() {
   const openRequests = requests.filter((r) => r.status === 'open' || r.status === 'partly_fulfilled')
   const openOrders = orders.filter((o) => ['draft', 'sent', 'discrepancy'].includes(o.status))
 
+  async function closeRequest(r) {
+    const reason = window.prompt(
+      `Close ${r.reference}? Anything outstanding will not be sent.\n\nWhy? (optional)`,
+      ''
+    )
+    if (reason === null) return
+
+    const { error } = await supabase
+      .from('restock_requests')
+      .update({
+        status: 'closed',
+        closed_at: new Date().toISOString(),
+        closed_by: profile.id,
+        closed_reason: reason.trim() || null,
+      })
+      .eq('id', r.id)
+
+    if (error) setStatus({ type: 'err', text: error.message })
+    else { setStatus({ type: 'ok', text: `${r.reference} closed.` }); load() }
+  }
+
+  async function reopenRequest(r) {
+    const { error } = await supabase
+      .from('restock_requests')
+      .update({ status: 'partly_fulfilled', closed_at: null, closed_by: null, closed_reason: null })
+      .eq('id', r.id)
+    if (error) setStatus({ type: 'err', text: error.message })
+    else load()
+  }
+
   async function discardDraft(r) {
     if (!window.confirm(`Discard ${r.reference}? This cannot be undone.`)) return
     const { error } = await supabase.from('restock_requests').delete().eq('id', r.id)
@@ -324,6 +354,16 @@ export default function Restocks() {
                             : 'Fulfil'}
                         </button>
                       )}
+                      {(r.status === 'open' || r.status === 'partly_fulfilled') && (
+                        <button className="btn btn-quiet" onClick={() => closeRequest(r)}>
+                          Close
+                        </button>
+                      )}
+                      {r.status === 'closed' && (
+                        <button className="btn btn-quiet" onClick={() => reopenRequest(r)}>
+                          Reopen
+                        </button>
+                      )}
                     </div>
                   </header>
 
@@ -345,6 +385,13 @@ export default function Restocks() {
                         <span>
                           <span className="fact-label">Note</span>
                           {r.note}
+                        </span>
+                      )}
+                      {r.status === 'closed' && (
+                        <span>
+                          <span className="fact-label">Closed</span>
+                          {formatDate(r.closed_at)}
+                          {r.closed_reason ? ` ~ ${r.closed_reason}` : ''}
                         </span>
                       )}
                     </div>
@@ -469,6 +516,7 @@ function StatusPill({ status }) {
     open: ['warn', 'Open'],
     partly_fulfilled: ['warn', 'Partly fulfilled'],
     fulfilled: ['ok', 'Fulfilled'],
+    closed: ['neutral', 'Closed short'],
     draft: ['warn', 'Ready to send'],
     sent: ['warn', 'Awaiting receipt'],
     received: ['ok', 'Received'],
