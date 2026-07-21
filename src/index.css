@@ -670,3 +670,11 @@ a.btn { display: inline-block; text-decoration: none; }
   background: var(--cream); border: 1px solid var(--blush); border-radius: 8px;
   padding: 10px; overflow: auto; max-height: 260px; font-size: 11px; line-height: 1.4;
 }
+
+/* Flex children shrink by default. Inside a scrolling list this squashes every
+   row to a sliver and `overflow: hidden` clips the content away. Pin them. */
+.product-list > .product-row { flex: 0 0 auto; }
+.return-list > .return-card { flex: 0 0 auto; }
+.item-list > .item-line { flex: 0 0 auto; }
+.line-picker > .line-row { flex: 0 0 auto; }
+.result-list > .result-row { flex: 0 0 auto; }
