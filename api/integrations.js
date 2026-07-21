@@ -409,6 +409,8 @@ async function syncBigCommerceProducts(sb, orgId, creds, config = {}) {
     problems.push(`Could not read brands: ${err.message}`)
   }
 
+  const excluded = await loadExclusions(sb, orgId, 'bigcommerce')
+
   const wanted = (config.sync_brands ?? []).map((b) => String(b).trim().toLowerCase())
   const keepBrand = (name) =>
     wanted.length === 0 || wanted.includes(String(name ?? '').trim().toLowerCase())
@@ -429,6 +431,7 @@ async function syncBigCommerceProducts(sb, orgId, creds, config = {}) {
     if (list.length === 0) break
 
     const kept = list.filter((p) => {
+      if (excluded.productExternalIds.has(String(p.id))) { skipped += 1; return false }
       const ok = keepBrand(p.brand_id ? brandNames[p.brand_id] : null)
       if (!ok) skipped += 1
       return ok
@@ -592,6 +595,7 @@ async function syncBigCommerceInventory(sb, orgId, creds, problems) {
       const variantId = variantIdByExternal[externalVariant]
       const locationId = locationByExternal[String(item.location_id)]
       if (!variantId || !locationId) continue
+      if (excluded.variantIds.has(variantId)) continue
 
       rows.push({
         org_id: orgId,
@@ -671,6 +675,8 @@ async function syncLightspeedProducts(sb, orgId, variant, creds, config = {}) {
     problems.push(`Brands: ${err.message}`)
   }
 
+  const excluded = await loadExclusions(sb, orgId, 'lightspeed')
+
   // Optional filter: only bring in these brands. Empty means everything.
   const wanted = (config.sync_brands ?? []).map((b) => String(b).trim().toLowerCase())
   const keepBrand = (name) =>
@@ -702,6 +708,12 @@ async function syncLightspeedProducts(sb, orgId, variant, creds, config = {}) {
       // Parent products first, so variants can hang off them.
       const parents = {}
       const kept = list.filter((p) => {
+        const parentId = String(p.variant_parent_id || p.id)
+        if (excluded.productExternalIds.has(parentId) ||
+            excluded.productExternalIds.has(String(p.id))) {
+          skipped += 1
+          return false
+        }
         const ok = keepBrand(p.brand_name || brandNames[String(p.brand_id)])
         if (!ok) skipped += 1
         return ok
@@ -796,6 +808,7 @@ async function syncLightspeedProducts(sb, orgId, variant, creds, config = {}) {
           const variantId = variantIdByExternal[String(row.product_id)]
           const locationId = locationByExternal[String(row.outlet_id)]
           if (!variantId || !locationId) continue
+          if (excluded.variantIds.has(variantId)) continue
           invMatched += 1
           stockRows.push({
             org_id: orgId,
@@ -832,6 +845,7 @@ async function syncLightspeedProducts(sb, orgId, variant, creds, config = {}) {
       if (list.length === 0) break
 
       const keptItems = list.filter((it) => {
+        if (excluded.productExternalIds.has(String(it.itemID))) { skipped += 1; return false }
         const ok = keepBrand(brandNames[String(it.manufacturerID)])
         if (!ok) skipped += 1
         return ok
@@ -1048,6 +1062,35 @@ async function syncLightspeedSuppliersAndBrands(sb, orgId, variant, creds) {
   }
 
   return { suppliers, brands, error: problems.length ? problems[0] : null }
+}
+
+// Products the user has excluded, plus their variants, so a sync leaves them
+// alone entirely.
+async function loadExclusions(sb, orgId, source) {
+  const productExternalIds = new Set()
+  const variantIds = new Set()
+
+  const { data: excluded } = await sb
+    .from('products')
+    .select('id, external_id')
+    .eq('org_id', orgId)
+    .eq('external_source', source)
+    .eq('sync_enabled', false)
+
+  if (!excluded || excluded.length === 0) return { productExternalIds, variantIds }
+
+  for (const p of excluded) if (p.external_id) productExternalIds.add(String(p.external_id))
+
+  const ids = excluded.map((p) => p.id)
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data: vs } = await sb
+      .from('variants')
+      .select('id')
+      .in('product_id', ids.slice(i, i + 200))
+    for (const v of vs ?? []) variantIds.add(v.id)
+  }
+
+  return { productExternalIds, variantIds }
 }
 
 async function loadVariantMap(sb, orgId, source, problems) {

@@ -8,7 +8,7 @@ const money = (n) =>
   new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(Number(n || 0))
 
 const SELECT =
-  'id,name,external_brand,image_url,status,external_source,created_at,last_synced_at,' +
+  'id,name,external_brand,image_url,status,external_source,sync_enabled,created_at,last_synced_at,' +
   'variants(id,sku,option_name,barcode,unit_cost,retail_price,' +
   'inventory_levels(on_hand,location_id,locations(name)))'
 
@@ -25,19 +25,25 @@ export default function Products() {
   const [expanded, setExpanded] = useState(new Set())
   const [locations, setLocations] = useState([])
   const [visibleLocations, setVisibleLocations] = useState(null)   // null = all
+  const [selected, setSelected] = useState(new Set())
+  const [syncFilter, setSyncFilter] = useState('')   // '', 'included', 'excluded'
   const [total, setTotal] = useState(0)
 
   const syncable = (org?.platforms ?? []).filter((p) => p === 'bigcommerce' || p === 'lightspeed')
   const connected = syncable.length > 0
 
   const load = useCallback(async (opts = {}) => {
-    const { search = query, brandVal = brand, sortVal = sort } = opts
+    const {
+      search = query, brandVal = brand, sortVal = sort, syncVal = syncFilter,
+    } = opts
     setLoading(true)
 
     let q = supabase.from('products').select(SELECT, { count: 'exact' }).limit(100)
 
     if (search.trim()) q = q.ilike('name', `%${search.trim()}%`)
     if (brandVal) q = q.eq('external_brand', brandVal)
+    if (syncVal === 'included') q = q.eq('sync_enabled', true)
+    if (syncVal === 'excluded') q = q.eq('sync_enabled', false)
 
     if (sortVal === 'newest') q = q.order('created_at', { ascending: false })
     else if (sortVal === 'recently_synced') q = q.order('last_synced_at', { ascending: false })
@@ -48,7 +54,7 @@ export default function Products() {
     setProducts(data ?? [])
     setTotal(count ?? 0)
     setLoading(false)
-  }, [query, brand, sort])
+  }, [query, brand, sort, syncFilter])
 
   useEffect(() => { load({}) }, [])   // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -117,6 +123,35 @@ export default function Products() {
     load({})
   }
 
+  function toggleSelect(id) {
+    setSelected((s) => {
+      const next = new Set(s)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  async function setSyncEnabled(enabled) {
+    const ids = [...selected]
+    if (ids.length === 0) return
+    const { error } = await supabase
+      .from('products')
+      .update({ sync_enabled: enabled })
+      .in('id', ids)
+    if (error) {
+      setStatus({ type: 'err', text: error.message })
+    } else {
+      setStatus({
+        type: 'ok',
+        text: `${ids.length} product${ids.length === 1 ? '' : 's'} ` +
+              (enabled ? 'will sync again.' : 'will be skipped on future syncs.'),
+      })
+      setSelected(new Set())
+      load({})
+    }
+  }
+
   function toggle(id) {
     setExpanded((e) => {
       const next = new Set(e)
@@ -177,6 +212,20 @@ export default function Products() {
               {brands.map((b) => <option key={b} value={b}>{b}</option>)}
             </select>
           </div>
+          <div className="filter-field" style={{ flex: '1 1 150px' }}>
+            <label htmlFor="p-sync">Syncing</label>
+            <select
+              id="p-sync"
+              className="input"
+              value={syncFilter}
+              onChange={(e) => { setSyncFilter(e.target.value); load({ syncVal: e.target.value }) }}
+            >
+              <option value="">All products</option>
+              <option value="included">Syncing</option>
+              <option value="excluded">Excluded</option>
+            </select>
+          </div>
+
           <div className="filter-field" style={{ flex: '1 1 170px' }}>
             <label htmlFor="p-sort">Sort by</label>
             <select
@@ -244,6 +293,38 @@ export default function Products() {
             </p>
           </div>
         ) : (
+          <>
+          <div className="bulk-bar">
+            <label className="check-row" style={{ margin: 0 }}>
+              <input
+                type="checkbox"
+                checked={products.length > 0 && products.every((p) => selected.has(p.id))}
+                onChange={(e) =>
+                  setSelected(e.target.checked ? new Set(products.map((p) => p.id)) : new Set())
+                }
+              />
+              <span>
+                {selected.size > 0
+                  ? `${selected.size} selected`
+                  : 'Select all shown'}
+              </span>
+            </label>
+
+            {selected.size > 0 && (
+              <div className="search-wrap">
+                <button className="btn" onClick={() => setSyncEnabled(false)}>
+                  Exclude from sync
+                </button>
+                <button className="btn" onClick={() => setSyncEnabled(true)}>
+                  Include in sync
+                </button>
+                <button className="btn btn-quiet" onClick={() => setSelected(new Set())}>
+                  Clear
+                </button>
+              </div>
+            )}
+          </div>
+
           <div className="product-list">
             {products.map((p) => {
               const isOpen = expanded.has(p.id)
@@ -262,8 +343,23 @@ export default function Products() {
 
               return (
                 <div key={p.id} className="product-row">
-                  <button className="product-head" onClick={() => toggle(p.id)}>
-                    <span className={'chev' + (isOpen ? ' open' : '')}>›</span>
+                  <div className={'product-head' + (p.sync_enabled ? '' : ' excluded')}>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(p.id)}
+                      onChange={() => toggleSelect(p.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      aria-label={`Select ${p.name}`}
+                    />
+                    <span
+                      className={'chev' + (isOpen ? ' open' : '')}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => toggle(p.id)}
+                      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && toggle(p.id)}
+                    >
+                      ›
+                    </span>
                     {p.image_url
                       ? <img className="thumb" src={p.image_url} alt="" loading="lazy" />
                       : <div className="thumb thumb-blank" />}
@@ -275,13 +371,15 @@ export default function Products() {
                         {p.status !== 'active' && ' · not visible online'}
                       </span>
                     </span>
+
+                    {!p.sync_enabled && <span className="excluded-tag">Not syncing</span>}
                     <span className="product-price">
                       {min === max ? money(min) : `${money(min)} - ${money(max)}`}
                     </span>
                     <span className={'stock-chip' + (stock === 0 ? ' zero' : '')}>
                       {stock} in stock
                     </span>
-                  </button>
+                  </div>
 
                   {isOpen && (
                     <div className="product-variants">
@@ -335,6 +433,7 @@ export default function Products() {
               )
             })}
           </div>
+          </>
         )}
       </div>
     </div>
