@@ -3,13 +3,11 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/Modal'
 
-const EMPTY = { name: '', type: 'store', external_ref: '', address: '', is_active: true }
+const EMPTY = { name: '', type: 'physical', external_ref: '', address: '', is_active: true }
 
 const TYPES = [
-  { value: 'warehouse', label: 'Warehouse' },
-  { value: 'store', label: 'Store' },
-  { value: 'popup', label: 'Pop up' },
-  { value: 'other', label: 'Other' },
+  { value: 'physical', label: 'Physical store' },
+  { value: 'online', label: 'Online store' },
 ]
 
 const typeLabel = (v) => TYPES.find((t) => t.value === v)?.label ?? v
@@ -86,8 +84,8 @@ export default function Locations() {
         <div className="eyebrow">Inventory</div>
         <h2 className="page-title">Locations</h2>
         <p className="page-desc">
-          Everywhere you hold stock ~ warehouses, stores and pop ups. Stock is counted per
-          location, and orders are allocated across them.
+          Everywhere you hold stock, physical or online. Stock is counted per location, and
+          orders are allocated across them.
         </p>
       </div>
 
