@@ -37,6 +37,7 @@ export default function Returns() {
   const [integrations, setIntegrations] = useState([])
   const [reasons, setReasons] = useState([])
   const [managingReasons, setManagingReasons] = useState(false)
+  const [tab, setTab] = useState('open')
   const [checking, setChecking] = useState(false)
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState(null)
@@ -111,6 +112,10 @@ export default function Returns() {
     load()
   }
 
+  const openReturns = returns.filter((r) => r.status === 'open')
+  const closedReturns = returns.filter((r) => r.status !== 'open')
+  const visible = tab === 'open' ? openReturns : tab === 'closed' ? closedReturns : returns
+
   function adminLink(r) {
     const platform = r.orders?.sales_channels?.platform
     const cfg = integrations.find((i) => i.provider === platform)?.config
@@ -159,18 +164,49 @@ export default function Returns() {
           </div>
         </div>
 
+        <div className="tabs">
+          {[
+            { key: 'open', label: 'Open', count: openReturns.length },
+            { key: 'closed', label: 'Closed', count: closedReturns.length },
+            { key: 'all', label: 'All', count: returns.length },
+          ].map((t) => (
+            <button
+              key={t.key}
+              className={'tab' + (tab === t.key ? ' active' : '')}
+              onClick={() => setTab(t.key)}
+            >
+              {t.label}
+              <span className="tab-count">{t.count}</span>
+            </button>
+          ))}
+        </div>
+
         {loading ? (
           <p className="page-desc">Loading...</p>
-        ) : returns.length === 0 ? (
+        ) : visible.length === 0 ? (
           <div className="empty-state">
-            <p>No returns logged yet.</p>
-            <p className="page-desc">
-              Search an order, pick the items that came back, say why and when.
-            </p>
+            {returns.length === 0 ? (
+              <>
+                <p>No returns logged yet.</p>
+                <p className="page-desc">
+                  Search an order, pick the items that came back, say why and when.
+                </p>
+              </>
+            ) : tab === 'open' ? (
+              <>
+                <p>Nothing open.</p>
+                <p className="page-desc">Every return has been refunded or cancelled.</p>
+              </>
+            ) : (
+              <>
+                <p>Nothing closed yet.</p>
+                <p className="page-desc">Returns appear here once refunded or cancelled.</p>
+              </>
+            )}
           </div>
         ) : (
           <div className="return-list">
-            {returns.map((r) => {
+            {visible.map((r) => {
               const link = adminLink(r)
               return (
                 <article key={r.id} className="return-card">

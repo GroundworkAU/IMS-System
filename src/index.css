@@ -508,3 +508,22 @@ a.btn { display: inline-block; text-decoration: none; }
   .return-items { border-left: none; padding-left: 0; border-top: 1px solid var(--blush); padding-top: 16px; }
   .return-card-head { align-items: flex-start; }
 }
+
+/* ---------- Tabs ---------- */
+.tabs {
+  display: flex; gap: 4px; margin-bottom: 16px;
+  border-bottom: 1px solid var(--blush); flex-wrap: wrap;
+}
+.tab {
+  background: none; border: none; padding: 8px 14px;
+  font-size: 13.5px; font-weight: 600; color: var(--muted);
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  display: flex; align-items: center; gap: 8px;
+}
+.tab:hover { color: var(--dark-brown); }
+.tab.active { color: var(--deep-brown); border-bottom-color: var(--deep-brown); }
+.tab-count {
+  background: var(--cream); border: 1px solid var(--blush);
+  border-radius: 20px; padding: 1px 8px; font-size: 11px; font-weight: 700;
+}
+.tab.active .tab-count { background: var(--blush); }
