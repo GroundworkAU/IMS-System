@@ -3,6 +3,8 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { loadOrderLines } from '../lib/integrations'
 import Modal from '../components/Modal'
+import OrderIssuesModal from '../components/OrderIssuesModal'
+import { useNavigate } from 'react-router-dom'
 
 // Sensible starting set. requires_items decides whether the person raising the
 // issue has to say which products are affected.
@@ -37,6 +39,8 @@ export default function CustomerService() {
   const [openReturns, setOpenReturns] = useState(0)
   const [attention, setAttention] = useState([])
   const [issueOrderIds, setIssueOrderIds] = useState(new Set())
+  const [issuesFor, setIssuesFor] = useState(null)
+  const navigate = useNavigate()
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -138,25 +142,38 @@ export default function CustomerService() {
       )}
 
       <div className="grid grid-3" style={{ marginBottom: 16 }}>
-        <div className="card">
-          <div className="stat-label">Open returns</div>
-          <div className="stat-value">{openReturns}</div>
-          <div className="stat-note">Logged but not yet refunded</div>
-        </div>
-        <div className="card">
-          <div className="stat-label">Open order issues</div>
-          <div className="stat-value">{openIssues.length}</div>
-          <div className="stat-note">Raised and waiting on someone</div>
-        </div>
-        <div className="card">
-          <div className="stat-label">Waiting 3+ days</div>
-          <div className="stat-value">{attention.length}</div>
-          <div className="stat-note">Orders placed but not yet shipped</div>
-        </div>
+        <button className="card stat-card" onClick={() => navigate('/returns')}>
+          <span className="stat-label">Open returns</span>
+          <span className="stat-value">{openReturns}</span>
+          <span className="stat-note">Logged but not yet refunded</span>
+        </button>
+
+        <button
+          className="card stat-card"
+          onClick={() => {
+            setTab('open')
+            document.getElementById('issues-list')?.scrollIntoView({ behavior: 'smooth' })
+          }}
+        >
+          <span className="stat-label">Open order issues</span>
+          <span className="stat-value">{openIssues.length}</span>
+          <span className="stat-note">Raised and waiting on someone</span>
+        </button>
+
+        <button
+          className="card stat-card"
+          onClick={() =>
+            document.getElementById('needs-attention')?.scrollIntoView({ behavior: 'smooth' })
+          }
+        >
+          <span className="stat-label">Waiting 3+ days</span>
+          <span className="stat-value">{attention.length}</span>
+          <span className="stat-note">Orders placed but not yet shipped</span>
+        </button>
       </div>
 
       {attention.length > 0 && (
-        <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card" id="needs-attention" style={{ marginBottom: 16 }}>
           <h3 className="section-title">Needs attention</h3>
           <p className="page-desc" style={{ marginBottom: 14 }}>
             Orders placed three or more days ago that have not shipped, oldest first.
@@ -174,9 +191,13 @@ export default function CustomerService() {
                       <td>
                         <span className="cell-strong">#{o.order_number}</span>
                         {issueOrderIds.has(o.id) && (
-                          <span className="flag-pill" title="An issue has been raised on this order">
+                          <button
+                            className="flag-pill flag-pill-button"
+                            title="See the issue raised on this order"
+                            onClick={() => setIssuesFor(o)}
+                          >
                             Issue
-                          </span>
+                          </button>
                         )}
                       </td>
                       <td>
@@ -199,7 +220,7 @@ export default function CustomerService() {
         </div>
       )}
 
-      <div className="card">
+      <div className="card" id="issues-list">
         <div className="card-head">
           <h3 className="section-title" style={{ margin: 0 }}>Order issues</h3>
           <div className="search-wrap">
@@ -390,6 +411,14 @@ export default function CustomerService() {
             setStatus({ type: 'ok', text: 'Issue updated.' })
             load()
           }}
+        />
+      )}
+
+      {issuesFor && (
+        <OrderIssuesModal
+          orderId={issuesFor.id}
+          orderNumber={issuesFor.order_number}
+          onClose={() => setIssuesFor(null)}
         />
       )}
 

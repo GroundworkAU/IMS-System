@@ -563,3 +563,30 @@ a.btn { display: inline-block; text-decoration: none; }
 }
 .days-warn { color: #9a5b16; font-weight: 600; }
 .days-bad { color: var(--red); font-weight: 700; }
+
+/* ---------- Clickable stat cards ---------- */
+.stat-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 0;
+  text-align: left; font-family: inherit; cursor: pointer; width: 100%;
+}
+.stat-card:hover { border-color: var(--deep-brown); background: var(--cream); }
+.stat-card .stat-value { margin-top: 6px; }
+.stat-card .stat-note { margin-top: 4px; }
+
+.flag-pill-button {
+  border: none; font-family: inherit; cursor: pointer;
+}
+.flag-pill-button:hover { background: #f6dcc2; }
+
+.issue-stack { display: flex; flex-direction: column; gap: 14px; }
+.issue-block {
+  border: 1px solid var(--blush); border-radius: 10px; padding: 14px;
+  background: var(--surface);
+}
+.issue-block-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+}
+.issue-detail {
+  margin: 8px 0 0; font-size: 13.5px; line-height: 1.55;
+  background: var(--cream); border-radius: 8px; padding: 10px 12px;
+}

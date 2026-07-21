@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { syncOrders, loadOrderLines } from '../lib/integrations'
 import Modal from '../components/Modal'
+import OrderIssuesModal from '../components/OrderIssuesModal'
 
 const money = (n) =>
   new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(Number(n || 0))
@@ -39,6 +40,7 @@ export default function Orders() {
   const [toDate, setToDate] = useState('')
   const [statusOptions, setStatusOptions] = useState([])
   const [issueOrderIds, setIssueOrderIds] = useState(new Set())
+  const [issuesFor, setIssuesFor] = useState(null)
 
   const connected = (org?.platforms ?? []).includes('bigcommerce')
 
@@ -258,9 +260,13 @@ export default function Orders() {
                     <td>
                       <span className="cell-strong">#{o.order_number}</span>
                       {issueOrderIds.has(o.id) && (
-                        <span className="flag-pill" title="An issue has been raised on this order">
+                        <button
+                          className="flag-pill flag-pill-button"
+                          title="See the issue raised on this order"
+                          onClick={() => setIssuesFor(o)}
+                        >
                           Issue
-                        </span>
+                        </button>
                       )}
                     </td>
                     <td>
@@ -286,6 +292,14 @@ export default function Orders() {
       </div>
 
       {viewing && <OrderModal order={viewing} onClose={() => setViewing(null)} />}
+
+      {issuesFor && (
+        <OrderIssuesModal
+          orderId={issuesFor.id}
+          orderNumber={issuesFor.order_number}
+          onClose={() => setIssuesFor(null)}
+        />
+      )}
     </div>
   )
 }
