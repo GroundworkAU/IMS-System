@@ -26,6 +26,7 @@ const NAV = [
     items: [
       { to: '/customer-service', label: 'Customer Service' },
       { to: '/orders', label: 'Orders' },
+      { to: '/order-issues', label: 'Order Issues' },
       { to: '/returns', label: 'Returns' },
     ],
   },

@@ -20,6 +20,7 @@ import GoodsInwards from './pages/GoodsInwards'
 import GoodsOutwards from './pages/GoodsOutwards'
 import Orders from './pages/Orders'
 import CustomerService from './pages/CustomerService'
+import OrderIssues from './pages/OrderIssues'
 import Returns from './pages/Returns'
 import Admin from './pages/Admin'
 import Settings from './pages/Settings'
@@ -53,6 +54,7 @@ export default function App() {
         <Route path="/goods-outwards" element={<GoodsOutwards />} />
         <Route path="/orders" element={<Orders />} />
         <Route path="/customer-service" element={<CustomerService />} />
+        <Route path="/order-issues" element={<OrderIssues />} />
         <Route path="/returns" element={<Returns />} />
         <Route path="/admin" element={<Admin />} />
         <Route path="/settings" element={<Settings />} />
