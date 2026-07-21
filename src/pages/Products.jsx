@@ -26,7 +26,7 @@ export default function Products() {
   const [locations, setLocations] = useState([])
   const [visibleLocations, setVisibleLocations] = useState(null)   // null = all
   const [selected, setSelected] = useState(new Set())
-  const [syncFilter, setSyncFilter] = useState('')   // '', 'included', 'excluded'
+  const [syncFilter, setSyncFilter] = useState('included')   // hide excluded by default
   const [total, setTotal] = useState(0)
 
   const syncable = (org?.platforms ?? []).filter((p) => p === 'bigcommerce' || p === 'lightspeed')
@@ -182,6 +182,8 @@ export default function Products() {
         <div className="card-head">
           <h3 className="section-title" style={{ margin: 0 }}>
             {products.length} of {total} products
+            {syncFilter === 'included' && ' · excluded ones hidden'}
+            {syncFilter === 'excluded' && ' · excluded only'}
           </h3>
           <button className="btn btn-primary" onClick={handleSync} disabled={syncing || !connected}>
             {syncing ? 'Bringing products in...' : 'Sync products'}
@@ -220,9 +222,9 @@ export default function Products() {
               value={syncFilter}
               onChange={(e) => { setSyncFilter(e.target.value); load({ syncVal: e.target.value }) }}
             >
-              <option value="">All products</option>
-              <option value="included">Syncing</option>
-              <option value="excluded">Excluded</option>
+              <option value="included">Syncing (default)</option>
+              <option value="excluded">Excluded only</option>
+              <option value="">Show everything</option>
             </select>
           </div>
 
@@ -267,12 +269,12 @@ export default function Products() {
 
           <div className="filter-actions">
             <button className="btn" onClick={() => load({})}>Apply</button>
-            {(query || brand || sort !== 'name') && (
+            {(query || brand || sort !== 'name' || syncFilter !== 'included') && (
               <button
                 className="btn btn-quiet"
                 onClick={() => {
-                  setQuery(''); setBrand(''); setSort('name')
-                  load({ search: '', brandVal: '', sortVal: 'name' })
+                  setQuery(''); setBrand(''); setSort('name'); setSyncFilter('included')
+                  load({ search: '', brandVal: '', sortVal: 'name', syncVal: 'included' })
                 }}
               >
                 Clear

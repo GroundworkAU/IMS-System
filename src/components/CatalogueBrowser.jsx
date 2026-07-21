@@ -19,7 +19,13 @@ export default function CatalogueBrowser({ selected, onChange, destinationId, fu
 
   const load = useCallback(async (search, brandVal) => {
     setLoading(true)
-    let q = supabase.from('products').select(SELECT).order('name').limit(60)
+    // Excluded products are not managed here, so keep them out of requests.
+    let q = supabase
+      .from('products')
+      .select(SELECT)
+      .eq('sync_enabled', true)
+      .order('name')
+      .limit(60)
     if (search?.trim()) q = q.ilike('name', `%${search.trim()}%`)
     if (brandVal) q = q.eq('external_brand', brandVal)
     const { data, error: qErr } = await q
