@@ -6,9 +6,10 @@ import { syncProducts } from '../lib/integrations'
 const money = (n) =>
   new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(Number(n || 0))
 
-const SELECT = `id, name, external_brand, image_url, status, external_source, created_at, last_synced_at,
-  variants(id, sku, option_name, barcode, unit_cost, retail_price,
-           inventory_levels(on_hand, location_id, locations(name)))`
+const SELECT =
+  'id,name,external_brand,image_url,status,external_source,created_at,last_synced_at,' +
+  'variants(id,sku,option_name,barcode,unit_cost,retail_price,' +
+  'inventory_levels(on_hand,location_id,locations(name)))'
 
 export default function Products() {
   const { org } = useAuth()
@@ -198,7 +199,7 @@ export default function Products() {
                       ? <img className="thumb" src={p.image_url} alt="" loading="lazy" />
                       : <div className="thumb thumb-blank" />}
                     <span className="product-main">
-                      <span className="cell-strong">{p.name}</span>
+                      <span className="cell-strong">{p.name || 'Unnamed product'}</span>
                       <span className="cell-sub">
                         {p.external_brand || 'No brand'} · {(p.variants ?? []).length} variant
                         {(p.variants ?? []).length === 1 ? '' : 's'}

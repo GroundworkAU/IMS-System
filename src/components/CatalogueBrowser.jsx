@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 
-const SELECT = `id, name, external_brand, image_url,
-  variants(id, sku, option_name,
-           inventory_levels(on_hand, location_id, locations(name)))`
+const SELECT =
+  'id,name,external_brand,image_url,variants(id,sku,option_name,inventory_levels(on_hand,location_id,locations(name)))'
 
 // Browse the catalogue with stock on hand, and set quantities per variant.
 // `selected` is { [variantId]: { name, sku, qty } } owned by the parent.
@@ -112,6 +111,12 @@ export default function CatalogueBrowser({ selected, onChange, destinationId, fu
         </div>
       )}
 
+      {!loading && !error && (
+        <p className="field-hint" style={{ marginTop: 0 }}>
+          Showing {products.length} product{products.length === 1 ? '' : 's'}.
+        </p>
+      )}
+
       {loading ? (
         <p className="field-hint">Loading catalogue...</p>
       ) : products.length === 0 ? (
@@ -135,7 +140,7 @@ export default function CatalogueBrowser({ selected, onChange, destinationId, fu
                     ? <img className="thumb" src={p.image_url} alt="" loading="lazy" />
                     : <div className="thumb thumb-blank" />}
                   <span className="product-main">
-                    <span className="cell-strong">{p.name}</span>
+                    <span className="cell-strong">{p.name || 'Unnamed product'}</span>
                     <span className="cell-sub">
                       {p.external_brand || 'No brand'}
                       {picked > 0 && ` · ${picked} selected`}

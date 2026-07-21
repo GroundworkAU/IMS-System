@@ -13,9 +13,7 @@ export default function OrderIssuesModal({ orderId, orderNumber, onClose }) {
   useEffect(() => {
     supabase
       .from('order_issues')
-      .select(`id, reference, reason, detail, status, created_at, resolved_at, resolution_note,
-               raised:raised_by(full_name), resolver:resolved_by(full_name),
-               order_issue_lines(id, qty, note, order_lines(name, sku))`)
+      .select('id,reference,reason,detail,status,created_at,resolved_at,resolution_note,raised:raised_by(full_name),resolver:resolved_by(full_name),order_issue_lines(id,qty,note,order_lines(name,sku))')
       .eq('order_id', orderId)
       .order('created_at', { ascending: false })
       .then(({ data }) => setIssues(data ?? []))

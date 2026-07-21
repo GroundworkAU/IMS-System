@@ -49,14 +49,7 @@ export default function Returns() {
     setLoading(true)
     const [r, l, i, rr] = await Promise.all([
       supabase.from('returns')
-        .select(`id, rma_number, order_number, return_date, reason, status, created_at,
-                 refunded_at, refund_source, returned_to_location_id,
-                 locations:returned_to_location_id(name),
-                 profiles:logged_by(full_name),
-                 orders(id, order_date, external_order_id,
-                        sales_channels(platform),
-                        customers(first_name, last_name, email)),
-                 return_lines(id, qty, condition, order_lines(name, sku))`)
+        .select('id,rma_number,order_number,return_date,reason,status,created_at,refunded_at,refund_source,returned_to_location_id,locations:returned_to_location_id(name),profiles:logged_by(full_name),orders(id,order_date,external_order_id,sales_channels(platform),customers(first_name,last_name,email)),return_lines(id,qty,condition,order_lines(name,sku))')
         .order('created_at', { ascending: false })
         .limit(100),
       supabase.from('locations').select('id, name').eq('is_active', true).order('name'),

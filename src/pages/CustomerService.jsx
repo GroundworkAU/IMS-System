@@ -48,12 +48,7 @@ export default function CustomerService() {
     setLoading(true)
     const [i, r] = await Promise.all([
       supabase.from('order_issues')
-        .select(`id, reference, order_number, reason, detail, status, created_at,
-                 resolved_at, resolution_note,
-                 raised:raised_by(full_name), resolver:resolved_by(full_name),
-                 orders(id, order_date, external_order_id, sales_channels(platform),
-                        customers(first_name, last_name, email)),
-                 order_issue_lines(id, qty, note, order_lines(name, sku))`)
+        .select('id,reference,order_number,reason,detail,status,created_at,resolved_at,resolution_note,raised:raised_by(full_name),resolver:resolved_by(full_name),orders(id,order_date,external_order_id,sales_channels(platform),customers(first_name,last_name,email)),order_issue_lines(id,qty,note,order_lines(name,sku))')
         .order('created_at', { ascending: false })
         .limit(100),
       supabase.from('issue_reasons')

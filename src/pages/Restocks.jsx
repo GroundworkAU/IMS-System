@@ -25,18 +25,11 @@ export default function Restocks() {
     setLoading(true)
     const [rq, ro, loc] = await Promise.all([
       supabase.from('restock_requests')
-        .select(`id, reference, status, note, created_at,
-                 destination:destination_location_id(name),
-                 requester:requested_by(full_name),
-                 restock_request_lines(id, variant_id, name, sku, qty_requested, qty_fulfilled, note)`)
+        .select('id,reference,status,note,created_at,destination:destination_location_id(name),requester:requested_by(full_name),restock_request_lines(id,variant_id,name,sku,qty_requested,qty_fulfilled,note)')
         .order('created_at', { ascending: false })
         .limit(100),
       supabase.from('restock_orders')
-        .select(`id, reference, status, note, created_at, external_transfer_id,
-                 source:source_location_id(name, external_refs),
-                 destination:destination_location_id(name),
-                 fulfiller:fulfilled_by(full_name),
-                 restock_order_lines(id, name, sku, qty_sent, qty_received, note)`)
+        .select('id,reference,status,note,created_at,external_transfer_id,source:source_location_id(name,external_refs),destination:destination_location_id(name),fulfiller:fulfilled_by(full_name),restock_order_lines(id,name,sku,qty_sent,qty_received,note)')
         .order('created_at', { ascending: false })
         .limit(100),
       supabase.from('locations')
