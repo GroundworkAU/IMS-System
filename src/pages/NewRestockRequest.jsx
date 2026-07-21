@@ -1,20 +1,28 @@
-import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useCallback, useEffect, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import CatalogueBrowser from '../components/CatalogueBrowser'
+import RequestDrawer from '../components/RequestDrawer'
 import { nextReference } from '../lib/references'
 
 export default function NewRestockRequest() {
   const { profile } = useAuth()
   const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const draftId = params.get('draft')
+
   const [locations, setLocations] = useState([])
   const [destination, setDestination] = useState('')
   const [note, setNote] = useState('')
   const [picked, setPicked] = useState({})
   const [manual, setManual] = useState([])
   const [busy, setBusy] = useState(false)
+  const [savingDraft, setSavingDraft] = useState(false)
+  const [drawerOpen, setDrawerOpen] = useState(false)
   const [error, setError] = useState(null)
+  const [loadingDraft, setLoadingDraft] = useState(!!draftId)
+  const [existingRef, setExistingRef] = useState(null)
 
   useEffect(() => {
     supabase
@@ -25,10 +33,66 @@ export default function NewRestockRequest() {
       .then(({ data }) => setLocations(data ?? []))
   }, [])
 
+  // Pick up where a draft left off.
+  useEffect(() => {
+    if (!draftId) return
+    async function loadDraft() {
+      const { data } = await supabase
+        .from('restock_requests')
+        .select('id,reference,destination_location_id,note,restock_request_lines(id,variant_id,name,sku,qty_requested)')
+        .eq('id', draftId)
+        .maybeSingle()
+
+      if (data) {
+        setExistingRef(data.reference)
+        setDestination(data.destination_location_id ?? '')
+        setNote(data.note ?? '')
+
+        const withVariants = (data.restock_request_lines ?? []).filter((l) => l.variant_id)
+        const byHand = (data.restock_request_lines ?? []).filter((l) => !l.variant_id)
+
+        if (withVariants.length) {
+          const { data: vs } = await supabase
+            .from('variants')
+            .select('id, sku, option_name, products(id, name, image_url)')
+            .in('id', withVariants.map((l) => l.variant_id))
+
+          const next = {}
+          for (const l of withVariants) {
+            const v = (vs ?? []).find((x) => x.id === l.variant_id)
+            next[l.variant_id] = {
+              product_id: v?.products?.id ?? null,
+              product_name: v?.products?.name ?? l.name,
+              option_name: v?.option_name ?? null,
+              image_url: v?.products?.image_url ?? null,
+              name: l.name,
+              sku: l.sku ?? v?.sku ?? '',
+              qty: l.qty_requested,
+            }
+          }
+          setPicked(next)
+        }
+
+        setManual(byHand.map((l) => ({ name: l.name, sku: l.sku ?? '', qty: l.qty_requested })))
+      }
+      setLoadingDraft(false)
+    }
+    loadDraft()
+  }, [draftId])
+
   const pickedList = Object.entries(picked)
-  const totalItems =
+  const lineCount = pickedList.length + manual.filter((m) => m.name.trim()).length
+  const itemCount =
     pickedList.reduce((n, [, v]) => n + Number(v.qty || 0), 0) +
     manual.reduce((n, m) => n + (Number(m.qty) || 0), 0)
+
+  const destinationName = locations.find((l) => l.id === destination)?.name
+
+  function setQty(variantId, qty) {
+    const n = Number(qty)
+    if (!n || n <= 0) return removePicked(variantId)
+    setPicked({ ...picked, [variantId]: { ...picked[variantId], qty: n } })
+  }
 
   function removePicked(variantId) {
     const next = { ...picked }
@@ -36,55 +100,92 @@ export default function NewRestockRequest() {
     setPicked(next)
   }
 
-  async function save() {
-    if (!destination) return setError('Choose where the stock is needed.')
-
+  const buildLines = useCallback(() => {
     const fromCatalogue = pickedList.map(([variantId, v]) => ({
       variant_id: variantId, name: v.name, sku: v.sku, qty: v.qty,
     }))
-    const manualLines = manual.filter((l) => l.name.trim() && Number(l.qty) > 0)
-    const all = [...fromCatalogue, ...manualLines]
+    const manualLines = manual
+      .filter((l) => l.name.trim() && Number(l.qty) > 0)
+      .map((l) => ({ variant_id: null, name: l.name, sku: l.sku, qty: l.qty }))
+    return [...fromCatalogue, ...manualLines]
+  }, [pickedList, manual])
 
-    if (all.length === 0) return setError('Add at least one item with a quantity.')
+  async function persist(status) {
+    const all = buildLines()
+    if (status === 'open') {
+      if (!destination) { setError('Choose where the stock is needed.'); return null }
+      if (all.length === 0) { setError('Add at least one item with a quantity.'); return null }
+    }
 
-    setBusy(true)
     setError(null)
+    const payload = {
+      org_id: profile.org_id,
+      destination_location_id: destination || null,
+      note: note.trim() || null,
+      status,
+      requested_by: profile.id,
+    }
 
-    const { data: created, error: rErr } = await supabase
-      .from('restock_requests')
-      .insert({
-        org_id: profile.org_id,
-        reference: await nextReference('restock_request', 'RS-'),
-        destination_location_id: destination,
-        note: note.trim() || null,
-        requested_by: profile.id,
-      })
-      .select('id')
-      .single()
+    let requestId = draftId
+    if (draftId) {
+      const { error: uErr } = await supabase
+        .from('restock_requests')
+        .update(payload)
+        .eq('id', draftId)
+      if (uErr) { setError(uErr.message); return null }
+      await supabase.from('restock_request_lines').delete().eq('request_id', draftId)
+    } else {
+      const { data, error: iErr } = await supabase
+        .from('restock_requests')
+        .insert({ ...payload, reference: await nextReference('restock_request', 'RS-') })
+        .select('id')
+        .single()
+      if (iErr) { setError(iErr.message); return null }
+      requestId = data.id
+    }
 
-    if (rErr) { setBusy(false); return setError(rErr.message) }
+    if (all.length) {
+      const { error: lErr } = await supabase.from('restock_request_lines').insert(
+        all.map((l) => ({
+          org_id: profile.org_id,
+          request_id: requestId,
+          variant_id: l.variant_id,
+          name: l.name.trim(),
+          sku: (l.sku || '').trim() || null,
+          qty_requested: Number(l.qty),
+        }))
+      )
+      if (lErr) { setError(lErr.message); return null }
+    }
 
-    const { error: lErr } = await supabase.from('restock_request_lines').insert(
-      all.map((l) => ({
-        org_id: profile.org_id,
-        request_id: created.id,
-        variant_id: l.variant_id ?? null,
-        name: l.name.trim(),
-        sku: (l.sku || '').trim() || null,
-        qty_requested: Number(l.qty),
-      }))
-    )
+    return requestId
+  }
 
+  async function saveDraft() {
+    setSavingDraft(true)
+    const id = await persist('draft')
+    setSavingDraft(false)
+    if (id) navigate('/restocks')
+  }
+
+  async function raise() {
+    setBusy(true)
+    const id = await persist('open')
     setBusy(false)
-    if (lErr) setError(lErr.message)
-    else navigate('/restocks')
+    if (id) navigate('/restocks')
+  }
+
+  if (loadingDraft) {
+    return <p className="page-desc">Loading draft...</p>
   }
 
   return (
     <div>
       <div className="page-head">
         <div className="eyebrow">Inventory</div>
-        <h2 className="page-title">New restock request</h2>
+        <h2 className="page-title">
+          {draftId ? `Continue ${existingRef ?? 'draft'}` : 'New restock request'}
+        </h2>
         <p className="page-desc">
           Pick where the stock is needed, then work through the catalogue setting quantities.
           Raising a request moves no stock on its own.
@@ -93,7 +194,6 @@ export default function NewRestockRequest() {
 
       {error && <div className="auth-msg err" style={{ marginBottom: 16 }}>{error}</div>}
 
-      {/* ---- request details, full width across the top ---- */}
       <div className="card request-bar">
         <div className="request-bar-fields">
           <div className="field" style={{ marginBottom: 0 }}>
@@ -124,8 +224,9 @@ export default function NewRestockRequest() {
 
           <div className="request-bar-actions">
             <button className="btn" onClick={() => navigate('/restocks')}>Cancel</button>
-            <button className="btn btn-primary" onClick={save} disabled={busy}>
-              {busy ? 'Raising...' : 'Raise request'}
+            <button className="btn btn-primary" onClick={() => setDrawerOpen(true)}>
+              Review request
+              {lineCount > 0 && <span className="cart-badge">{lineCount}</span>}
             </button>
           </div>
         </div>
@@ -136,34 +237,15 @@ export default function NewRestockRequest() {
               ? 'Stock at this location is highlighted as you browse.'
               : 'Choose a location to see what is already there as you browse.'}
           </span>
-
-          {(pickedList.length > 0 || manual.length > 0) && (
+          {lineCount > 0 && (
             <span className="request-count">
-              {pickedList.length + manual.length} line
-              {pickedList.length + manual.length === 1 ? '' : 's'} · {totalItems} item
-              {totalItems === 1 ? '' : 's'}
+              {lineCount} line{lineCount === 1 ? '' : 's'} · {itemCount} item
+              {itemCount === 1 ? '' : 's'}
             </span>
           )}
         </div>
-
-        {(pickedList.length > 0 || manual.length > 0) && (
-          <div className="selected-chips">
-            {pickedList.map(([variantId, v]) => (
-              <span key={variantId} className="selected-chip">
-                <strong>{v.qty}</strong> {v.name}
-                <button className="chip-x" onClick={() => removePicked(variantId)}>x</button>
-              </span>
-            ))}
-            {manual.filter((m) => m.name.trim()).map((m, i) => (
-              <span key={`m-${i}`} className="selected-chip">
-                <strong>{m.qty}</strong> {m.name}
-              </span>
-            ))}
-          </div>
-        )}
       </div>
 
-      {/* ---- catalogue, full width ---- */}
       <div className="card">
         <h3 className="section-title">Choose what you need</h3>
         <CatalogueBrowser
@@ -225,6 +307,28 @@ export default function NewRestockRequest() {
         </button>
       </div>
 
+      {/* Floating button so the request is always one tap away */}
+      {lineCount > 0 && !drawerOpen && (
+        <button className="cart-fab" onClick={() => setDrawerOpen(true)}>
+          Review request
+          <span className="cart-badge">{lineCount}</span>
+        </button>
+      )}
+
+      <RequestDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        picked={picked}
+        manual={manual}
+        onQty={setQty}
+        onRemove={removePicked}
+        onRemoveManual={(i) => setManual(manual.filter((_, idx) => idx !== i))}
+        onSaveDraft={saveDraft}
+        onRaise={raise}
+        busy={busy}
+        savingDraft={savingDraft}
+        destinationName={destinationName}
+      />
     </div>
   )
 }

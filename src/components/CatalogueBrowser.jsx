@@ -76,6 +76,10 @@ export default function CatalogueBrowser({ selected, onChange, destinationId, fu
       delete next[variant.id]
     } else {
       next[variant.id] = {
+        product_id: product.id,
+        product_name: product.name,
+        option_name: variant.option_name || null,
+        image_url: product.image_url || null,
         name: variant.option_name ? `${product.name} ~ ${variant.option_name}` : product.name,
         sku: variant.sku || '',
         qty: n,

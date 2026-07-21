@@ -44,8 +44,16 @@ export default function Restocks() {
 
   useEffect(() => { load() }, [load])
 
+  const drafts = requests.filter((r) => r.status === 'draft')
   const openRequests = requests.filter((r) => r.status === 'open' || r.status === 'partly_fulfilled')
   const openOrders = orders.filter((o) => ['draft', 'sent', 'discrepancy'].includes(o.status))
+
+  async function discardDraft(r) {
+    if (!window.confirm(`Discard ${r.reference}? This cannot be undone.`)) return
+    const { error } = await supabase.from('restock_requests').delete().eq('id', r.id)
+    if (error) setStatus({ type: 'err', text: error.message })
+    else { setStatus({ type: 'ok', text: 'Draft discarded.' }); load() }
+  }
 
   // ---- send a goods inwards to the warehouse -------------------------------
   async function sendGoodsInwards(order) {
@@ -131,7 +139,8 @@ export default function Restocks() {
         <div className="card-head">
           <div className="tabs" style={{ margin: 0, border: 'none' }}>
             {[
-              { key: 'requests', label: 'Requests', count: requests.length },
+              { key: 'requests', label: 'Requests', count: requests.length - drafts.length },
+              { key: 'drafts', label: 'Drafts', count: drafts.length },
               { key: 'orders', label: 'Restock orders', count: orders.length },
             ].map((t) => (
               <button
@@ -151,8 +160,74 @@ export default function Restocks() {
 
         {loading ? (
           <p className="page-desc">Loading...</p>
+        ) : tab === 'drafts' ? (
+          drafts.length === 0 ? (
+            <div className="empty-state">
+              <p>No drafts.</p>
+              <p className="page-desc">
+                Half finished requests are saved here so you can pick them up later.
+              </p>
+            </div>
+          ) : (
+            <div className="return-list">
+              {drafts.map((r) => (
+                <article key={r.id} className="return-card">
+                  <header className="return-card-head">
+                    <div className="return-ident">
+                      <span className="return-order">{r.reference}</span>
+                      <span className="return-customer">
+                        {r.destination?.name ? `for ${r.destination.name}` : 'no location yet'}
+                      </span>
+                    </div>
+                    <div className="return-card-actions">
+                      <span className="status-pill neutral">Draft</span>
+                      <button
+                        className="btn btn-primary"
+                        onClick={() => navigate(`/restocks/new?draft=${r.id}`)}
+                      >
+                        Continue
+                      </button>
+                      <button className="btn btn-quiet" onClick={() => discardDraft(r)}>
+                        Discard
+                      </button>
+                    </div>
+                  </header>
+                  <div className="return-card-body">
+                    <dl className="return-facts">
+                      <div>
+                        <dt>Started</dt>
+                        <dd>
+                          {formatDate(r.created_at)}
+                          <span className="cell-sub">by {r.requester?.full_name || 'Unknown'}</span>
+                        </dd>
+                      </div>
+                    </dl>
+                    <div className="return-items">
+                      <span className="panel-label">So far</span>
+                      <div className="item-list">
+                        {(r.restock_request_lines ?? []).slice(0, 6).map((l) => (
+                          <div key={l.id} className="item-line">
+                            <span className="item-qty">{l.qty_requested}</span>
+                            <span><span className="item-name">{l.name}</span></span>
+                          </div>
+                        ))}
+                        {(r.restock_request_lines ?? []).length > 6 && (
+                          <span className="cell-sub">
+                            and {(r.restock_request_lines ?? []).length - 6} more
+                          </span>
+                        )}
+                        {(r.restock_request_lines ?? []).length === 0 && (
+                          <span className="cell-sub">Nothing added yet</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )
         ) : tab === 'requests' ? (
-          requests.length === 0 ? (
+          requests.filter((r) => r.status !== 'draft').length === 0 ? (
             <div className="empty-state">
               <p>No restock requests yet.</p>
               <p className="page-desc">
@@ -161,7 +236,7 @@ export default function Restocks() {
             </div>
           ) : (
             <div className="return-list">
-              {requests.map((r) => (
+              {requests.filter((r) => r.status !== 'draft').map((r) => (
                 <article key={r.id} className="return-card">
                   <header className="return-card-head">
                     <div className="return-ident">
