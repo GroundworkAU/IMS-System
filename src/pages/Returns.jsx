@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { loadOrderLines, syncOrders } from '../lib/integrations'
 import Modal from '../components/Modal'
 
-const REASONS = [
+const DEFAULT_REASONS = [
   'Wrong size',
   'Wrong item sent',
   'Faulty or damaged',
@@ -31,10 +31,12 @@ const formatDate = (d) =>
   d ? new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'
 
 export default function Returns() {
-  const { profile } = useAuth()
+  const { profile, isAdmin } = useAuth()
   const [returns, setReturns] = useState([])
   const [locations, setLocations] = useState([])
   const [integrations, setIntegrations] = useState([])
+  const [reasons, setReasons] = useState([])
+  const [managingReasons, setManagingReasons] = useState(false)
   const [checking, setChecking] = useState(false)
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState(null)
@@ -43,7 +45,7 @@ export default function Returns() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [r, l, i] = await Promise.all([
+    const [r, l, i, rr] = await Promise.all([
       supabase.from('returns')
         .select(`id, rma_number, order_number, return_date, reason, status, created_at,
                  refunded_at, refund_source, returned_to_location_id,
@@ -56,11 +58,15 @@ export default function Returns() {
         .limit(100),
       supabase.from('locations').select('id, name').eq('is_active', true).order('name'),
       supabase.from('integration_settings').select('provider, config, status'),
+      supabase.from('return_reasons')
+        .select('id, label, sort_order, is_active')
+        .order('sort_order').order('label'),
     ])
     if (r.error) setStatus({ type: 'err', text: r.error.message })
     setReturns(r.data ?? [])
     setLocations(l.data ?? [])
     setIntegrations(i.data ?? [])
+    setReasons(rr.data ?? [])
     setLoading(false)
   }, [])
 
@@ -138,6 +144,11 @@ export default function Returns() {
         <div className="card-head">
           <h3 className="section-title" style={{ margin: 0 }}>Logged returns</h3>
           <div className="search-wrap">
+            {isAdmin && (
+              <button className="btn" onClick={() => setManagingReasons(true)}>
+                Return reasons
+              </button>
+            )}
             <button className="btn" onClick={checkRefunds} disabled={checking}>
               {checking ? 'Checking...' : 'Check for refunds'}
             </button>
@@ -235,9 +246,19 @@ export default function Returns() {
       {creating && (
         <LogReturnModal
           locations={locations}
+          reasons={reasons.filter((r) => r.is_active)}
           profile={profile}
           onClose={() => setCreating(false)}
           onSaved={() => { setCreating(false); setStatus({ type: 'ok', text: 'Return logged.' }); load() }}
+        />
+      )}
+
+      {managingReasons && (
+        <ReasonsModal
+          reasons={reasons}
+          profile={profile}
+          onClose={() => setManagingReasons(false)}
+          onChanged={load}
         />
       )}
 
@@ -249,7 +270,7 @@ export default function Returns() {
 // ---------------------------------------------------------------------------
 // Log a return: find the order, pick the items, say where and why.
 // ---------------------------------------------------------------------------
-function LogReturnModal({ locations, profile, onClose, onSaved }) {
+function LogReturnModal({ locations, reasons, profile, onClose, onSaved }) {
   const [step, setStep] = useState('find')
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
@@ -487,6 +508,11 @@ function LogReturnModal({ locations, profile, onClose, onSaved }) {
                   <option key={l.id} value={l.id}>{l.name}</option>
                 ))}
               </select>
+              {locations.length === 0 && (
+                <p className="field-hint">
+                  No active locations yet. Add them on the Locations page first.
+                </p>
+              )}
             </div>
             <div className="field" style={{ flex: '1 1 150px' }}>
               <label htmlFor="r-date">Date received</label>
@@ -509,10 +535,16 @@ function LogReturnModal({ locations, profile, onClose, onSaved }) {
               onChange={(e) => setReason(e.target.value)}
             >
               <option value="">Choose...</option>
-              {REASONS.map((r) => (
-                <option key={r} value={r}>{r}</option>
+              {reasons.map((r) => (
+                <option key={r.id} value={r.label}>{r.label}</option>
               ))}
             </select>
+            {reasons.length === 0 && (
+              <p className="field-hint">
+                No reasons set up yet. An owner or admin can add them with the Return reasons
+                button on this page.
+              </p>
+            )}
           </div>
 
           <div className="field">
@@ -582,6 +614,142 @@ function ReturnDetailModal({ ret, onClose }) {
           </tbody>
         </table>
       )}
+    </Modal>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Manage the list of reasons a return can be logged against.
+// ---------------------------------------------------------------------------
+function ReasonsModal({ reasons, profile, onClose, onChanged }) {
+  const [items, setItems] = useState(reasons)
+  const [newLabel, setNewLabel] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  async function refresh() {
+    const { data } = await supabase
+      .from('return_reasons')
+      .select('id, label, sort_order, is_active')
+      .order('sort_order').order('label')
+    setItems(data ?? [])
+    onChanged()
+  }
+
+  async function add() {
+    const label = newLabel.trim()
+    if (!label) return
+    setBusy(true)
+    setError(null)
+    const { error } = await supabase.from('return_reasons').insert({
+      org_id: profile.org_id,
+      label,
+      sort_order: items.length,
+    })
+    setBusy(false)
+    if (error) {
+      setError(error.code === '23505' ? 'That reason already exists.' : error.message)
+    } else {
+      setNewLabel('')
+      refresh()
+    }
+  }
+
+  async function addDefaults() {
+    setBusy(true)
+    setError(null)
+    const rows = DEFAULT_REASONS.map((label, i) => ({
+      org_id: profile.org_id,
+      label,
+      sort_order: i,
+    }))
+    const { error } = await supabase.from('return_reasons').insert(rows)
+    setBusy(false)
+    if (error) setError(error.message)
+    else refresh()
+  }
+
+  async function toggle(item) {
+    await supabase
+      .from('return_reasons')
+      .update({ is_active: !item.is_active })
+      .eq('id', item.id)
+    refresh()
+  }
+
+  async function rename(item, label) {
+    if (!label.trim() || label === item.label) return
+    const { error } = await supabase
+      .from('return_reasons')
+      .update({ label: label.trim() })
+      .eq('id', item.id)
+    if (error) setError(error.code === '23505' ? 'That reason already exists.' : error.message)
+    else refresh()
+  }
+
+  async function remove(item) {
+    if (!window.confirm(`Remove "${item.label}"? Returns already logged keep their reason.`)) return
+    const { error } = await supabase.from('return_reasons').delete().eq('id', item.id)
+    if (error) setError(error.message)
+    else refresh()
+  }
+
+  return (
+    <Modal
+      title="Return reasons"
+      onClose={onClose}
+      footer={<button className="btn btn-primary" onClick={onClose}>Done</button>}
+    >
+      <p className="field-hint" style={{ marginTop: 0 }}>
+        These are the options your team picks from when logging a return. Turning one off hides
+        it from new returns without changing anything already logged.
+      </p>
+
+      {items.length === 0 ? (
+        <div className="empty-state" style={{ marginBottom: 16 }}>
+          <p>No reasons yet.</p>
+          <p className="page-desc">Start with a common set, then adjust to suit.</p>
+          <button className="btn btn-primary" onClick={addDefaults} disabled={busy}>
+            {busy ? 'Adding...' : 'Add the common ones'}
+          </button>
+        </div>
+      ) : (
+        <div className="reason-list">
+          {items.map((item) => (
+            <div key={item.id} className={'reason-row' + (item.is_active ? '' : ' inactive')}>
+              <input
+                className="input"
+                defaultValue={item.label}
+                onBlur={(e) => rename(item, e.target.value)}
+              />
+              <button
+                className="btn"
+                onClick={() => toggle(item)}
+                title={item.is_active ? 'Hide from new returns' : 'Show again'}
+              >
+                {item.is_active ? 'On' : 'Off'}
+              </button>
+              <button className="btn btn-quiet" onClick={() => remove(item)}>Remove</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <h4 className="sub-label">Add a reason</h4>
+      <div className="search-wrap">
+        <input
+          className="input"
+          placeholder="e.g. Ordered wrong item"
+          value={newLabel}
+          onChange={(e) => setNewLabel(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && add()}
+        />
+        <button className="btn btn-primary" onClick={add} disabled={busy || !newLabel.trim()}>
+          Add
+        </button>
+      </div>
+
+      {error && <div className="auth-msg err">{error}</div>}
     </Modal>
   )
 }

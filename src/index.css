@@ -446,3 +446,8 @@ a.btn { display: inline-block; text-decoration: none; }
 
 .status-pill.bad { background: #f7e2de; color: var(--red); }
 .status-pill.info { background: #e6edf5; color: #2f4f74; }
+
+.reason-list { display: flex; flex-direction: column; gap: 8px; }
+.reason-row { display: flex; gap: 8px; align-items: center; }
+.reason-row .input { flex: 1 1 auto; }
+.reason-row.inactive .input { opacity: 0.55; }
