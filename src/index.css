@@ -443,3 +443,6 @@ textarea.input { resize: vertical; font-family: inherit; }
 }
 
 a.btn { display: inline-block; text-decoration: none; }
+
+.status-pill.bad { background: #f7e2de; color: var(--red); }
+.status-pill.info { background: #e6edf5; color: #2f4f74; }

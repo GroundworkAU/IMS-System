@@ -7,6 +7,22 @@ import Modal from '../components/Modal'
 const money = (n) =>
   new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(Number(n || 0))
 
+// Colour the status so the list can be scanned at a glance.
+// Note the platform spells it 'Fulfillment', so match loosely.
+function statusTone(status) {
+  const v = String(status || '').toLowerCase()
+  if (!v) return 'neutral'
+  if (v.includes('shipped') && !v.includes('partially')) return 'ok'
+  if (v.includes('completed')) return 'ok'
+  if (v.includes('cancel') || v.includes('declined') || v.includes('disputed')) return 'bad'
+  if (v.includes('refunded')) return 'info'
+  if (
+    v.includes('awaiting') || v.includes('pending') ||
+    v.includes('partially') || v.includes('verification')
+  ) return 'warn'
+  return 'neutral'
+}
+
 const formatDate = (d) =>
   d ? new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'
 
@@ -145,7 +161,11 @@ export default function Orders() {
                       {o.customers?.email && <div className="cell-sub">{o.customers.email}</div>}
                     </td>
                     <td>{formatDate(o.order_date)}</td>
-                    <td><span className="pill">{o.status || 'Unknown'}</span></td>
+                    <td>
+                      <span className={`status-pill ${statusTone(o.status)}`}>
+                        {o.status || 'Unknown'}
+                      </span>
+                    </td>
                     <td>{money(o.total)}</td>
                     <td style={{ textAlign: 'right' }}>
                       <button className="btn" onClick={() => setViewing(o)}>View</button>
@@ -190,7 +210,12 @@ function OrderModal({ order, onClose }) {
         <div><span className="detail-label">Email</span>{order.customers?.email || order.raw?.email || '-'}</div>
         <div><span className="detail-label">Phone</span>{order.raw?.phone || '-'}</div>
         <div><span className="detail-label">Placed</span>{formatDate(order.order_date)}</div>
-        <div><span className="detail-label">Status</span>{order.status || '-'}</div>
+        <div>
+          <span className="detail-label">Status</span>
+          <span className={`status-pill ${statusTone(order.status)}`}>
+            {order.status || '-'}
+          </span>
+        </div>
         <div><span className="detail-label">Payment</span>{order.financial_status || '-'}</div>
       </div>
 
