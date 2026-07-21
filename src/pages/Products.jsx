@@ -95,6 +95,9 @@ export default function Products() {
       let bit = `${label}: ${res.products} products, ${res.variants} variants`
       if (res.stockRows) {
         bit += `, stock on ${res.stockRows} lines`
+        if (res.invFetched && res.invMatched < res.invFetched) {
+          bit += ` (${res.invFetched - res.invMatched} stock records could not be matched)`
+        }
       } else if (res.stockLocationMissing) {
         bit += ` ~ no location has "Stock figures come from" set to ${label}`
       } else if (res.invFetched === 0) {

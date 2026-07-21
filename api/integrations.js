@@ -672,7 +672,7 @@ async function syncLightspeedProducts(sb, orgId, variant, creds) {
     let guard = 0
     const productIdByExternal = {}
 
-    while (guard < 20) {
+    while (guard < 200) {
       guard += 1
       const body = await lsFetch(
         variant, creds,
@@ -751,7 +751,7 @@ async function syncLightspeedProducts(sb, orgId, variant, creds) {
       let invAfter = 0
       let invGuard = 0
 
-      while (invGuard < 20) {
+      while (invGuard < 200) {
         invGuard += 1
         let body
         try {
@@ -781,6 +781,7 @@ async function syncLightspeedProducts(sb, orgId, variant, creds) {
         const maxVersion = list.reduce((m, r) => Math.max(m, Number(r.version ?? 0)), invAfter)
         if (maxVersion === invAfter || list.length < 500) break
         invAfter = maxVersion
+        if (invGuard === 199) problems.push('Stopped after 100,000 stock records')
       }
     }
   } else {
@@ -788,7 +789,7 @@ async function syncLightspeedProducts(sb, orgId, variant, creds) {
     let offset = 0
     let guard = 0
 
-    while (guard < 40) {
+    while (guard < 400) {
       guard += 1
       let body
       try {
