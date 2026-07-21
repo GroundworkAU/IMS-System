@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { sortVariants } from '../lib/sizes'
 
+const stockTone = (n) => (n < 0 ? ' negative' : n === 0 ? ' zero' : '')
+
 const SELECT =
   'id,name,external_brand,image_url,variants(id,sku,option_name,inventory_levels(on_hand,location_id,locations(name)))'
 
@@ -169,7 +171,7 @@ export default function CatalogueBrowser({ selected, onChange, destinationId, fu
                     </span>
                   </span>
 
-                  <span className={'stock-chip' + (totalStock === 0 ? ' zero' : '')}>
+                  <span className={'stock-chip' + stockTone(totalStock)}>
                     {totalStock} in stock
                   </span>
                 </div>
@@ -206,7 +208,7 @@ export default function CatalogueBrowser({ selected, onChange, destinationId, fu
                                   key={l.id}
                                   className={
                                     'num' + (l.isDestination ? ' destination' : '') +
-                                    (l.qty === 0 ? ' zero' : '')
+                                    stockTone(l.qty)
                                   }
                                 >
                                   {l.qty}

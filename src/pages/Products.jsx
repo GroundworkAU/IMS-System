@@ -14,6 +14,10 @@ const SELECT =
 
 const platformLabel = { bigcommerce: 'BigCommerce', lightspeed: 'Lightspeed', shopify: 'Shopify' }
 
+// Negative stock means the platform has oversold or a count is wrong, which is
+// worth flagging differently to simply having none.
+const stockTone = (n) => (n < 0 ? ' negative' : n === 0 ? ' zero' : '')
+
 export default function Products() {
   const { org } = useAuth()
   const [products, setProducts] = useState([])
@@ -384,7 +388,7 @@ export default function Products() {
                     <span className="product-price">
                       {min === max ? money(min) : `${money(min)} - ${money(max)}`}
                     </span>
-                    <span className={'stock-chip' + (stock === 0 ? ' zero' : '')}>
+                    <span className={'stock-chip' + stockTone(stock)}>
                       {stock} in stock
                     </span>
                   </div>
@@ -425,11 +429,11 @@ export default function Products() {
                                 </td>
                                 <td className="num">{money(v.retail_price)}</td>
                                 {rows.map((r) => (
-                                  <td key={r.id} className={'num' + (r.qty === 0 ? ' zero' : '')}>
+                                  <td key={r.id} className={'num' + stockTone(r.qty)}>
                                     {r.qty}
                                   </td>
                                 ))}
-                                <td className="num cell-strong">{total}</td>
+                                <td className={'num cell-strong' + stockTone(total)}>{total}</td>
                               </tr>
                             )
                           })}

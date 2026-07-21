@@ -811,3 +811,8 @@ a.btn { display: inline-block; text-decoration: none; }
 }
 .product-head input[type="checkbox"] { flex: none; }
 .product-head .chev { cursor: pointer; }
+
+/* Negative stock is a data problem worth noticing, not just "none left". */
+.stock-chip.negative { background: #fbead9; color: #9a5b16; }
+.variant-table td.num.negative { color: #9a5b16; font-weight: 700; }
+.stock-num.negative { color: #9a5b16; }
