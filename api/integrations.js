@@ -68,6 +68,70 @@ async function testConnection(provider, variant, creds) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Fetch the locations / outlets a platform knows about, so a user can pick one
+// from a list instead of typing an id. Returns [{ id, name }].
+// ---------------------------------------------------------------------------
+async function fetchRemoteLocations(provider, variant, creds) {
+  if (provider === 'shopify') {
+    const shop = (creds.shop_domain || '').replace(/^https?:\/\//, '').replace(/\/$/, '')
+    const res = await fetch(`https://${shop}/admin/api/2024-10/locations.json`, {
+      headers: { 'X-Shopify-Access-Token': creds.access_token },
+    })
+    if (!res.ok) throw new Error(`Shopify replied ${res.status}.`)
+    const body = await res.json()
+    return (body.locations ?? []).map((l) => ({
+      id: String(l.id),
+      name: l.name,
+      detail: [l.city, l.province, l.country_code].filter(Boolean).join(', '),
+    }))
+  }
+
+  if (provider === 'bigcommerce') {
+    const res = await fetch(
+      `https://api.bigcommerce.com/stores/${creds.store_hash}/v3/inventory/locations`,
+      { headers: { 'X-Auth-Token': creds.access_token, Accept: 'application/json' } }
+    )
+    // Multi location inventory is not enabled on every plan.
+    if (res.status === 404 || res.status === 403) {
+      return { unsupported: true, locations: [] }
+    }
+    if (!res.ok) throw new Error(`BigCommerce replied ${res.status}.`)
+    const body = await res.json()
+    return (body.data ?? []).map((l) => ({
+      id: String(l.id),
+      name: l.label || l.name || l.code || `Location ${l.id}`,
+      detail: l.code ?? '',
+    }))
+  }
+
+  if (provider === 'lightspeed') {
+    if (variant === 'xseries') {
+      const domain = (creds.domain_prefix || '').replace(/\.retail\.lightspeed\.app$/, '')
+      const res = await fetch(`https://${domain}.retail.lightspeed.app/api/2.0/outlets`, {
+        headers: { Authorization: `Bearer ${creds.access_token}` },
+      })
+      if (!res.ok) throw new Error(`Lightspeed replied ${res.status}.`)
+      const body = await res.json()
+      return (body.data ?? []).map((o) => ({
+        id: String(o.id),
+        name: o.name,
+        detail: [o.physical_city, o.physical_state].filter(Boolean).join(', '),
+      }))
+    }
+    const res = await fetch(
+      `https://api.lightspeedapp.com/API/V3/Account/${creds.account_id}/Shop.json`,
+      { headers: { Authorization: `Bearer ${creds.access_token}` } }
+    )
+    if (!res.ok) throw new Error(`Lightspeed replied ${res.status}.`)
+    const body = await res.json()
+    const shops = Array.isArray(body.Shop) ? body.Shop : body.Shop ? [body.Shop] : []
+    return shops.map((s) => ({ id: String(s.shopID), name: s.name, detail: '' }))
+  }
+
+  return []
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
@@ -163,6 +227,33 @@ export default async function handler(req, res) {
         status: result.ok ? 'connected' : 'error',
         error: result.error ?? null,
       })
+    }
+
+    // --- list locations from the platform ----------------------------------
+    if (action === 'locations') {
+      const { data: secret } = await sb
+        .from('integration_secrets')
+        .select('credentials')
+        .match({ org_id: orgId, provider })
+        .maybeSingle()
+
+      if (!secret) return res.status(400).json({ error: 'Not connected yet.' })
+
+      const { data: setting } = await sb
+        .from('integration_settings')
+        .select('variant')
+        .match({ org_id: orgId, provider })
+        .maybeSingle()
+
+      try {
+        const result = await fetchRemoteLocations(provider, setting?.variant, secret.credentials)
+        if (result?.unsupported) {
+          return res.status(200).json({ ok: true, unsupported: true, locations: [] })
+        }
+        return res.status(200).json({ ok: true, locations: result })
+      } catch (err) {
+        return res.status(200).json({ ok: false, error: err.message, locations: [] })
+      }
     }
 
     // --- save / connect ----------------------------------------------------

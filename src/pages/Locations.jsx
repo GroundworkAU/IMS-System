@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/Modal'
 import { platformInfo } from '../lib/platforms'
+import { fetchPlatformLocations } from '../lib/integrations'
 import { Link } from 'react-router-dom'
 
 const EMPTY = { name: '', type: 'physical', external_refs: {}, address: '', is_active: true }
@@ -18,23 +19,53 @@ export default function Locations() {
   const { profile, org } = useAuth()
   const orgPlatforms = org?.platforms ?? []
   const [locations, setLocations] = useState([])
+  const [settings, setSettings] = useState([])
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState(null)
   const [busy, setBusy] = useState(false)
   const [modal, setModal] = useState(null)
+  const [remote, setRemote] = useState({})   // { provider: {loading, options, error, unsupported} }
 
   const load = useCallback(async () => {
     setLoading(true)
-    const { data, error } = await supabase
-      .from('locations')
-      .select('id, name, type, external_refs, address, is_active')
-      .order('name')
-    if (error) setStatus({ type: 'err', text: error.message })
-    setLocations(data ?? [])
+    const [l, i] = await Promise.all([
+      supabase.from('locations')
+        .select('id, name, type, external_refs, address, is_active')
+        .order('name'),
+      supabase.from('integration_settings').select('provider, status'),
+    ])
+    if (l.error) setStatus({ type: 'err', text: l.error.message })
+    setLocations(l.data ?? [])
+    setSettings(i.data ?? [])
     setLoading(false)
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  // Pull the location lists from any platform that is connected, so the user
+  // can pick from a dropdown rather than typing an id.
+  useEffect(() => {
+    let cancelled = false
+    async function loadRemote() {
+      const connected = (settings ?? []).filter((s) => s.status === 'connected')
+      for (const s of connected) {
+        setRemote((r) => ({ ...r, [s.provider]: { loading: true } }))
+        const res = await fetchPlatformLocations(s.provider)
+        if (cancelled) return
+        setRemote((r) => ({
+          ...r,
+          [s.provider]: {
+            loading: false,
+            options: res.locations ?? [],
+            unsupported: res.unsupported ?? false,
+            error: res.ok === false ? res.error : null,
+          },
+        }))
+      }
+    }
+    if (settings.length) loadRemote()
+    return () => { cancelled = true }
+  }, [settings])
 
   async function save(values, id) {
     if (!values.name.trim()) {
@@ -142,12 +173,17 @@ export default function Locations() {
                     <td><span className="pill">{typeLabel(l.type)}</span></td>
                     <td>
                       {Object.keys(l.external_refs ?? {}).length > 0 ? (
-                        Object.entries(l.external_refs).map(([key, val]) => (
-                          <div key={key} className="ref-line">
-                            <span className="ref-name">{platformInfo(key).label}</span>
-                            <code className="code-ref">{val}</code>
-                          </div>
-                        ))
+                        Object.entries(l.external_refs).map(([key, val]) => {
+                          const match = remote?.[key]?.options?.find((o) => o.id === val)
+                          return (
+                            <div key={key} className="ref-line">
+                              <span className="ref-name">{platformInfo(key).label}</span>
+                              {match
+                                ? <span className="cell-strong">{match.name}</span>
+                                : <code className="code-ref">{val}</code>}
+                            </div>
+                          )
+                        })
                       ) : (
                         <span className="cell-sub">Not linked</span>
                       )}
@@ -180,6 +216,7 @@ export default function Locations() {
           initial={modal.values}
           id={modal.id}
           orgPlatforms={orgPlatforms}
+          remote={remote}
           busy={busy}
           onClose={() => setModal(null)}
           onSave={save}
@@ -189,7 +226,7 @@ export default function Locations() {
   )
 }
 
-function LocationModal({ initial, id, orgPlatforms, busy, onClose, onSave }) {
+function LocationModal({ initial, id, orgPlatforms, remote, busy, onClose, onSave }) {
   const [v, setV] = useState(initial)
   const set = (k) => (e) => setV({ ...v, [k]: e.target.value })
   const setRef = (key) => (e) =>
@@ -234,17 +271,58 @@ function LocationModal({ initial, id, orgPlatforms, busy, onClose, onSave }) {
           <h4 className="sub-label">Linked systems (optional)</h4>
           {orgPlatforms.map((key) => {
             const info = platformInfo(key)
+            const r = remote?.[key]
+            const current = v.external_refs?.[key] ?? ''
+            const options = r?.options ?? []
+            // If the saved value is not in the fetched list, keep it visible.
+            const missing = current && !options.some((o) => o.id === current)
+
             return (
               <div className="field" key={key}>
                 <label htmlFor={`l-ref-${key}`}>{info.refLabel}</label>
-                <input
-                  id={`l-ref-${key}`}
-                  className="input"
-                  placeholder="Optional for now"
-                  value={v.external_refs?.[key] ?? ''}
-                  onChange={setRef(key)}
-                />
-                <p className="field-hint">{info.refHint}</p>
+
+                {r?.loading ? (
+                  <p className="field-hint">Loading locations from {info.label}...</p>
+                ) : options.length > 0 ? (
+                  <>
+                    <select
+                      id={`l-ref-${key}`}
+                      className="input"
+                      value={current}
+                      onChange={setRef(key)}
+                    >
+                      <option value="">Not linked</option>
+                      {options.map((o) => (
+                        <option key={o.id} value={o.id}>
+                          {o.name}{o.detail ? ` ~ ${o.detail}` : ''}
+                        </option>
+                      ))}
+                      {missing && (
+                        <option value={current}>{current} (no longer in {info.label})</option>
+                      )}
+                    </select>
+                    <p className="field-hint">
+                      Pulled live from {info.label}. Pick the one this location matches.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <input
+                      id={`l-ref-${key}`}
+                      className="input"
+                      placeholder="Optional for now"
+                      value={current}
+                      onChange={setRef(key)}
+                    />
+                    <p className="field-hint">
+                      {r?.unsupported
+                        ? `${info.label} is not returning a location list on your plan, so enter the reference by hand.`
+                        : r?.error
+                          ? `Could not load locations from ${info.label}: ${r.error}`
+                          : info.refHint}
+                    </p>
+                  </>
+                )}
               </div>
             )
           })}

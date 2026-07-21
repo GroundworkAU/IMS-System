@@ -81,3 +81,8 @@ export async function callIntegrations(payload) {
   if (!res.ok) return { ok: false, error: body.error || `Request failed (${res.status}).` }
   return body
 }
+
+// Ask a connected platform for its locations / outlets.
+export async function fetchPlatformLocations(provider) {
+  return callIntegrations({ action: 'locations', provider })
+}
