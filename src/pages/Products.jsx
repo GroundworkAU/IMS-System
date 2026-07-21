@@ -12,6 +12,8 @@ const SELECT =
   'variants(id,sku,option_name,barcode,unit_cost,retail_price,' +
   'inventory_levels(on_hand,location_id,locations(name)))'
 
+const platformLabel = { bigcommerce: 'BigCommerce', lightspeed: 'Lightspeed', shopify: 'Shopify' }
+
 export default function Products() {
   const { org } = useAuth()
   const [products, setProducts] = useState([])
@@ -29,7 +31,9 @@ export default function Products() {
   const [syncFilter, setSyncFilter] = useState('included')   // hide excluded by default
   const [total, setTotal] = useState(0)
 
-  const syncable = (org?.platforms ?? []).filter((p) => p === 'bigcommerce' || p === 'lightspeed')
+  // Only the nominated catalogue source brings products in, so the same product
+  // sold on two platforms cannot arrive twice.
+  const syncable = org?.catalogue_source ? [org.catalogue_source] : []
   const connected = syncable.length > 0
 
   const load = useCallback(async (opts = {}) => {
@@ -78,8 +82,6 @@ export default function Products() {
         setBrands([...new Set((data ?? []).map((p) => p.external_brand))].sort())
       })
   }, [total])
-
-  const platformLabel = { bigcommerce: 'BigCommerce', lightspeed: 'Lightspeed' }
 
   async function handleSync() {
     setSyncing(true)
@@ -186,7 +188,11 @@ export default function Products() {
             {syncFilter === 'excluded' && ' · excluded only'}
           </h3>
           <button className="btn btn-primary" onClick={handleSync} disabled={syncing || !connected}>
-            {syncing ? 'Bringing products in...' : 'Sync products'}
+            {syncing
+              ? 'Bringing products in...'
+              : connected
+                ? `Sync from ${platformLabel[org.catalogue_source] ?? org.catalogue_source}`
+                : 'Sync products'}
           </button>
         </div>
 
@@ -290,8 +296,8 @@ export default function Products() {
             <p>{query || brand ? 'No products match those filters.' : 'No products yet.'}</p>
             <p className="page-desc">
               {connected
-                ? 'Hit Sync products to bring your catalogue across.'
-                : 'Connect a platform in Settings to sync your catalogue.'}
+                ? 'Hit Sync to bring your catalogue across.'
+                : 'Choose which platform owns your catalogue in Settings, then sync.'}
             </p>
           </div>
         ) : (

@@ -14,6 +14,8 @@ export default function Settings() {
   const [status, setStatus] = useState(null)
   const [settings, setSettings] = useState([])
   const [counters, setCounters] = useState([])
+  const [catalogueSource, setCatalogueSource] = useState('')
+  const [tidying, setTidying] = useState(false)
 
   const KINDS = [
     { kind: 'restock_request', label: 'Restock requests', example: 'RS-0001' },
@@ -59,6 +61,7 @@ export default function Settings() {
     if (org) {
       setName(org.name ?? '')
       setPlatforms(org.platforms ?? [])
+      setCatalogueSource(org.catalogue_source ?? '')
       loadSettings()
       loadCounters()
     }
@@ -66,6 +69,33 @@ export default function Settings() {
 
   function toggle(value) {
     setPlatforms((p) => (p.includes(value) ? p.filter((v) => v !== value) : [...p, value]))
+  }
+
+  // Clears out products brought in from a platform that no longer owns the
+  // catalogue, which is what leaves duplicates behind after switching.
+  async function tidyDuplicates() {
+    if (!window.confirm(
+      'Remove products that came from other systems? Their stock records go with them. ' +
+      'Anything already on a restock line keeps its line, but loses the product link.'
+    )) return
+
+    setTidying(true)
+    setStatus(null)
+    const { data, error } = await supabase
+      .from('products')
+      .delete()
+      .neq('external_source', catalogueSource)
+      .not('external_source', 'is', null)
+      .select('id')
+
+    setTidying(false)
+    if (error) setStatus({ type: 'err', text: error.message })
+    else {
+      setStatus({
+        type: 'ok',
+        text: `Removed ${data?.length ?? 0} product${data?.length === 1 ? '' : 's'} from other systems.`,
+      })
+    }
   }
 
   async function save() {
@@ -77,7 +107,11 @@ export default function Settings() {
     setStatus(null)
     const { error } = await supabase
       .from('organisations')
-      .update({ name: name.trim(), platforms })
+      .update({
+        name: name.trim(),
+        platforms,
+        catalogue_source: catalogueSource || null,
+      })
       .eq('id', org.id)
     setBusy(false)
     if (error) setStatus({ type: 'err', text: error.message })
@@ -180,6 +214,44 @@ export default function Settings() {
           </>
         )}
       </div>
+
+      {connectable.length > 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h3 className="section-title">Where your products come from</h3>
+          <p className="page-desc" style={{ marginBottom: 14 }}>
+            Only one system brings products in. If the same product is sold on two platforms it
+            would otherwise arrive twice, once under each platform's own id.
+          </p>
+
+          <div className="field" style={{ maxWidth: 320 }}>
+            <label htmlFor="cat-source">Catalogue source</label>
+            <select
+              id="cat-source"
+              className="input"
+              value={catalogueSource}
+              onChange={(e) => setCatalogueSource(e.target.value)}
+            >
+              <option value="">Not set ~ products will not sync</option>
+              {connectable.map((p) => (
+                <option key={p} value={p}>{PLATFORMS.find((x) => x.value === p)?.label ?? p}</option>
+              ))}
+            </select>
+            <p className="field-hint">
+              Other systems keep doing what they are best at ~ orders, customers and refunds.
+              Remember to save after changing this.
+            </p>
+          </div>
+
+          {catalogueSource && (
+            <div className="placeholder-note">
+              Products already brought in from another system stay put.{' '}
+              <button className="linklike" onClick={tidyDuplicates} disabled={tidying}>
+                {tidying ? 'Removing...' : 'Remove products from other systems'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {connectable.length > 0 && (
         <div className="card" style={{ marginBottom: 16 }}>

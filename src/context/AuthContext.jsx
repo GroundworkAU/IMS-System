@@ -32,7 +32,7 @@ export function AuthProvider({ children }) {
     if (p?.org_id) {
       const { data: o } = await supabase
         .from('organisations')
-        .select('id, name, plan, platforms, subscription_status, trial_ends_at')
+        .select('id, name, plan, platforms, catalogue_source, subscription_status, trial_ends_at')
         .eq('id', p.org_id)
         .maybeSingle()
       setOrg(o ?? null)
