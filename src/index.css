@@ -300,3 +300,30 @@ select.input { background: var(--surface); }
   letter-spacing: 0.06em; color: var(--muted);
 }
 .table-wrap { overflow-x: auto; }
+
+/* ---------- Card head, cells, empty states ---------- */
+.card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 16px;
+}
+.cell-strong { font-weight: 600; color: var(--dark-brown); }
+.cell-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.cell-sub a { text-decoration: underline; }
+
+.empty-state {
+  padding: 22px; text-align: center; background: var(--cream);
+  border: 1px solid var(--blush); border-radius: 10px;
+}
+.empty-state p { margin: 0 auto 6px; }
+.empty-state p:last-child { margin-bottom: 0; }
+.empty-state .page-desc { max-width: 440px; }
+
+.sub-label {
+  font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.09em;
+  font-weight: 700; color: var(--muted); margin: 22px 0 12px;
+  padding-top: 16px; border-top: 1px solid var(--blush);
+}
+.btn-quiet { color: var(--muted); }
+.btn-quiet:hover { color: var(--red); }
+textarea.input { resize: vertical; font-family: inherit; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
