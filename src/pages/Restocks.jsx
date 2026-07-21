@@ -308,6 +308,14 @@ export default function Restocks() {
                       )}
                       {(r.status === 'open' || r.status === 'partly_fulfilled') && (
                         <button
+                          className="btn"
+                          onClick={() => navigate(`/restocks/new?request=${r.id}`)}
+                        >
+                          Edit
+                        </button>
+                      )}
+                      {(r.status === 'open' || r.status === 'partly_fulfilled') && (
+                        <button
                           className="btn btn-primary"
                           onClick={() => navigate(`/restocks/${r.id}/fulfil`)}
                         >

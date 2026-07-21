@@ -11,7 +11,10 @@ export default function NewRestockRequest() {
   const { profile } = useAuth()
   const navigate = useNavigate()
   const [params] = useSearchParams()
+  // Same builder for drafts and for editing a request already raised.
   const draftId = params.get('draft')
+  const requestId = params.get('request')
+  const editId = draftId || requestId
 
   const [locations, setLocations] = useState([])
   const [destination, setDestination] = useState('')
@@ -22,8 +25,11 @@ export default function NewRestockRequest() {
   const [savingDraft, setSavingDraft] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [error, setError] = useState(null)
-  const [loadingDraft, setLoadingDraft] = useState(!!draftId)
+  const [loadingDraft, setLoadingDraft] = useState(!!editId)
   const [existingRef, setExistingRef] = useState(null)
+  const [existingStatus, setExistingStatus] = useState(null)
+  const [existingLines, setExistingLines] = useState({})   // key -> {id, fulfilled}
+  const [locked, setLocked] = useState([])                 // lines already fulfilled
 
   useEffect(() => {
     supabase
@@ -36,16 +42,29 @@ export default function NewRestockRequest() {
 
   // Pick up where a draft left off.
   useEffect(() => {
-    if (!draftId) return
+    if (!editId) return
     async function loadDraft() {
       const { data } = await supabase
         .from('restock_requests')
-        .select('id,reference,destination_location_id,note,restock_request_lines(id,variant_id,name,sku,qty_requested)')
-        .eq('id', draftId)
+        .select('id,reference,status,destination_location_id,note,restock_request_lines(id,variant_id,name,sku,qty_requested,qty_fulfilled)')
+        .eq('id', editId)
         .maybeSingle()
 
       if (data) {
         setExistingRef(data.reference)
+        setExistingStatus(data.status)
+
+        const map = {}
+        const alreadySent = []
+        for (const l of data.restock_request_lines ?? []) {
+          map[l.variant_id ?? `manual:${l.name}`] = {
+            id: l.id,
+            fulfilled: l.qty_fulfilled ?? 0,
+          }
+          if ((l.qty_fulfilled ?? 0) > 0) alreadySent.push(l.name)
+        }
+        setExistingLines(map)
+        setLocked(alreadySent)
         setDestination(data.destination_location_id ?? '')
         setNote(data.note ?? '')
 
@@ -79,7 +98,7 @@ export default function NewRestockRequest() {
       setLoadingDraft(false)
     }
     loadDraft()
-  }, [draftId])
+  }, [editId])
 
   const pickedList = Object.entries(picked)
   const lineCount = pickedList.length + manual.filter((m) => m.name.trim()).length
@@ -127,14 +146,55 @@ export default function NewRestockRequest() {
       requested_by: profile.id,
     }
 
-    let requestId = draftId
-    if (draftId) {
+    let requestId = editId
+    if (editId) {
+      // Keep the status of a request that has already been raised.
+      const keepStatus = existingStatus && existingStatus !== 'draft'
+        ? { ...payload, status: existingStatus }
+        : payload
+
       const { error: uErr } = await supabase
         .from('restock_requests')
-        .update(payload)
-        .eq('id', draftId)
+        .update(keepStatus)
+        .eq('id', editId)
       if (uErr) { setError(uErr.message); return null }
-      await supabase.from('restock_request_lines').delete().eq('request_id', draftId)
+
+      // Update lines in place rather than replacing them, so anything a
+      // fulfilment already points at keeps its identity and its totals.
+      const seen = new Set()
+      for (const l of all) {
+        const key = l.variant_id ?? `manual:${l.name.trim()}`
+        seen.add(key)
+        const existing = existingLines[key]
+
+        if (existing) {
+          const qtyWanted = Math.max(Number(l.qty), existing.fulfilled)
+          const { error: e } = await supabase
+            .from('restock_request_lines')
+            .update({ qty_requested: qtyWanted, name: l.name.trim(), sku: (l.sku || '').trim() || null })
+            .eq('id', existing.id)
+          if (e) { setError(e.message); return null }
+        } else {
+          const { error: e } = await supabase.from('restock_request_lines').insert({
+            org_id: profile.org_id,
+            request_id: editId,
+            variant_id: l.variant_id,
+            name: l.name.trim(),
+            sku: (l.sku || '').trim() || null,
+            qty_requested: Number(l.qty),
+          })
+          if (e) { setError(e.message); return null }
+        }
+      }
+
+      // Remove lines dropped from the request, unless something has already
+      // been sent against them.
+      for (const [key, existing] of Object.entries(existingLines)) {
+        if (seen.has(key) || existing.fulfilled > 0) continue
+        await supabase.from('restock_request_lines').delete().eq('id', existing.id)
+      }
+
+      return editId
     } else {
       const { data, error: iErr } = await supabase
         .from('restock_requests')
@@ -187,7 +247,11 @@ export default function NewRestockRequest() {
       <div className="page-head">
         <div className="eyebrow">Inventory</div>
         <h2 className="page-title">
-          {draftId ? `Continue ${existingRef ?? 'draft'}` : 'New restock request'}
+          {requestId
+            ? `Edit ${existingRef ?? 'request'}`
+            : draftId
+              ? `Continue ${existingRef ?? 'draft'}`
+              : 'New restock request'}
         </h2>
         <p className="page-desc">
           Pick where the stock is needed, then work through the catalogue setting quantities.
@@ -196,6 +260,16 @@ export default function NewRestockRequest() {
       </div>
 
       {error && <div className="auth-msg err" style={{ marginBottom: 16 }}>{error}</div>}
+
+      {locked.length > 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="placeholder-note" style={{ margin: 0 }}>
+            Some of this request has already been sent. Those lines cannot be removed, and their
+            quantity cannot drop below what has gone out: {locked.slice(0, 4).join(', ')}
+            {locked.length > 4 && ` and ${locked.length - 4} more`}.
+          </div>
+        </div>
+      )}
 
       <div className="card request-bar">
         <div className="request-bar-fields">
@@ -228,7 +302,7 @@ export default function NewRestockRequest() {
           <div className="request-bar-actions">
             <button className="btn" onClick={() => navigate('/restocks')}>Cancel</button>
             <button className="btn btn-primary" onClick={() => setDrawerOpen(true)}>
-              Review request
+              {requestId ? 'Review changes' : 'Review request'}
               {lineCount > 0 && <span className="cart-badge">{lineCount}</span>}
             </button>
           </div>
@@ -326,7 +400,7 @@ export default function NewRestockRequest() {
         onQty={setQty}
         onRemove={removePicked}
         onRemoveManual={(i) => setManual(manual.filter((_, idx) => idx !== i))}
-        onSaveDraft={saveDraft}
+        onSaveDraft={requestId ? null : saveDraft}
         onRaise={raise}
         busy={busy}
         savingDraft={savingDraft}

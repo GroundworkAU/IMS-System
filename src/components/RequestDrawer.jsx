@@ -135,11 +135,13 @@ export default function RequestDrawer({
             <strong>{itemCount} item{itemCount === 1 ? '' : 's'}</strong>
           </div>
           <div className="cart-actions">
-            <button className="btn" onClick={onSaveDraft} disabled={savingDraft || busy}>
-              {savingDraft ? 'Saving...' : 'Save draft'}
-            </button>
+            {onSaveDraft && (
+              <button className="btn" onClick={onSaveDraft} disabled={savingDraft || busy}>
+                {savingDraft ? 'Saving...' : 'Save draft'}
+              </button>
+            )}
             <button className="btn btn-primary" onClick={onRaise} disabled={busy || savingDraft}>
-              {busy ? 'Raising...' : 'Raise request'}
+              {busy ? 'Saving...' : onSaveDraft ? 'Raise request' : 'Save changes'}
             </button>
           </div>
         </footer>
