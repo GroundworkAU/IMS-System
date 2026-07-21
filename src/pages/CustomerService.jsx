@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { loadOrderLines } from '../lib/integrations'
 import Modal from '../components/Modal'
+import { nextReference } from '../lib/references'
 import OrderIssuesModal from '../components/OrderIssuesModal'
 import { useIntegrationConfigs, orderAdminUrl } from '../lib/platformLinks'
 import { useNavigate } from 'react-router-dom'
@@ -527,7 +528,7 @@ function RaiseIssueModal({ reasons, profile, onClose, onSaved }) {
     setBusy(true)
     setError(null)
 
-    const reference = 'ISS-' + Date.now().toString(36).toUpperCase()
+    const reference = await nextReference('issue', 'ISS-')
 
     const { data: created, error: iErr } = await supabase
       .from('order_issues')

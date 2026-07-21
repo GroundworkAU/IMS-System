@@ -746,3 +746,29 @@ a.btn { display: inline-block; text-decoration: none; }
   .product-variants { overflow-x: auto; }
   .variant-table { min-width: 520px; }
 }
+
+/* ---------- Request bar ---------- */
+.request-bar { margin-bottom: 16px; }
+.request-bar-fields {
+  display: grid;
+  grid-template-columns: minmax(200px, 1fr) minmax(240px, 2fr) auto;
+  gap: 16px; align-items: end;
+}
+.request-bar-actions { display: flex; gap: 8px; }
+.request-bar-foot {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 12px; margin-top: 10px;
+}
+.request-count {
+  font-size: 12px; font-weight: 700; color: var(--deep-brown);
+  background: var(--cream); border: 1px solid var(--blush);
+  border-radius: 20px; padding: 3px 12px; white-space: nowrap;
+}
+.request-bar .selected-chips {
+  margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--blush);
+}
+
+@media (max-width: 860px) {
+  .request-bar-fields { grid-template-columns: 1fr; }
+  .request-bar-actions { justify-content: flex-end; }
+}

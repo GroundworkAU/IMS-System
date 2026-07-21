@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { loadOrderLines, syncOrders, checkRefunds as checkRefundsApi } from '../lib/integrations'
 import Modal from '../components/Modal'
+import { nextReference } from '../lib/references'
 
 const DEFAULT_REASONS = [
   'Wrong size',
@@ -444,7 +445,7 @@ function LogReturnModal({ locations, reasons, profile, onClose, onSaved }) {
     setBusy(true)
     setError(null)
 
-    const rma = 'RMA-' + Date.now().toString(36).toUpperCase()
+    const rma = await nextReference('return', 'RMA-')
 
     const { data: created, error: rErr } = await supabase
       .from('returns')

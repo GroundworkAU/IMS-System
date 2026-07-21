@@ -11,6 +11,40 @@ export default function Settings() {
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState(null)
   const [settings, setSettings] = useState([])
+  const [counters, setCounters] = useState([])
+
+  const KINDS = [
+    { kind: 'restock_request', label: 'Restock requests', example: 'RS-0001' },
+    { kind: 'restock_order', label: 'Restock orders', example: 'RO-0001' },
+    { kind: 'return', label: 'Returns', example: 'RMA-0001' },
+    { kind: 'issue', label: 'Order issues', example: 'ISS-0001' },
+  ]
+
+  const loadCounters = async () => {
+    const { data } = await supabase
+      .from('reference_counters')
+      .select('kind, prefix, padding, next_number')
+    setCounters(data ?? [])
+  }
+
+  const counterFor = (kind) =>
+    counters.find((c) => c.kind === kind) ?? { prefix: '', padding: 4, next_number: 1 }
+
+  async function saveCounter(kind, patch) {
+    const current = counterFor(kind)
+    const { error } = await supabase.from('reference_counters').upsert(
+      {
+        org_id: org.id,
+        kind,
+        prefix: patch.prefix ?? current.prefix,
+        padding: current.padding,
+        next_number: patch.next_number ?? current.next_number,
+      },
+      { onConflict: 'org_id,kind' }
+    )
+    if (error) setStatus({ type: 'err', text: error.message })
+    else loadCounters()
+  }
 
   const loadSettings = async () => {
     const { data } = await supabase
@@ -24,6 +58,7 @@ export default function Settings() {
       setName(org.name ?? '')
       setPlatforms(org.platforms ?? [])
       loadSettings()
+      loadCounters()
     }
   }, [org])
 
@@ -142,6 +177,62 @@ export default function Settings() {
             </div>
           </>
         )}
+      </div>
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <h3 className="section-title">Reference numbers</h3>
+        <p className="page-desc" style={{ marginBottom: 14 }}>
+          The prefix used when something is raised, followed by a number that counts up. Change
+          the prefix to whatever your team already says out loud.
+        </p>
+
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr><th>Record</th><th>Prefix</th><th>Next number</th><th>Looks like</th></tr>
+            </thead>
+            <tbody>
+              {KINDS.map((k) => {
+                const c = counterFor(k.kind)
+                return (
+                  <tr key={k.kind}>
+                    <td className="cell-strong">{k.label}</td>
+                    <td>
+                      <input
+                        className="input mini"
+                        style={{ width: 90 }}
+                        defaultValue={c.prefix}
+                        placeholder={k.example.split('-')[0] + '-'}
+                        onBlur={(e) => saveCounter(k.kind, { prefix: e.target.value })}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        className="input mini"
+                        style={{ width: 80 }}
+                        type="number"
+                        min="1"
+                        defaultValue={c.next_number}
+                        onBlur={(e) =>
+                          saveCounter(k.kind, { next_number: Number(e.target.value) || 1 })
+                        }
+                      />
+                    </td>
+                    <td>
+                      <code className="code-ref">
+                        {(c.prefix || '') + String(c.next_number).padStart(c.padding ?? 4, '0')}
+                      </code>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+        <p className="field-hint">
+          Changing the next number is handy when moving off an old system ~ set it to carry on
+          from where you left off.
+        </p>
       </div>
 
       <button className="btn btn-primary" onClick={save} disabled={busy}>

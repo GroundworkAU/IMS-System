@@ -3,8 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import CatalogueBrowser from '../components/CatalogueBrowser'
-
-const ref = (prefix) => `${prefix}-${Date.now().toString(36).toUpperCase()}`
+import { nextReference } from '../lib/references'
 
 export default function NewRestockRequest() {
   const { profile } = useAuth()
@@ -55,7 +54,7 @@ export default function NewRestockRequest() {
       .from('restock_requests')
       .insert({
         org_id: profile.org_id,
-        reference: ref('REQ'),
+        reference: await nextReference('restock_request', 'RS-'),
         destination_location_id: destination,
         note: note.trim() || null,
         requested_by: profile.id,
@@ -95,11 +94,9 @@ export default function NewRestockRequest() {
       {error && <div className="auth-msg err" style={{ marginBottom: 16 }}>{error}</div>}
 
       {/* ---- request details, full width across the top ---- */}
-      <div className="card" style={{ marginBottom: 16 }}>
-        <h3 className="section-title">Request details</h3>
-
-        <div className="form-row">
-          <div className="field" style={{ flex: '1 1 240px', marginBottom: 0 }}>
+      <div className="card request-bar">
+        <div className="request-bar-fields">
+          <div className="field" style={{ marginBottom: 0 }}>
             <label htmlFor="dest">Stock needed at</label>
             <select
               id="dest"
@@ -112,12 +109,9 @@ export default function NewRestockRequest() {
                 <option key={l.id} value={l.id}>{l.name}</option>
               ))}
             </select>
-            <p className="field-hint">
-              Setting this shows what is already there as you browse.
-            </p>
           </div>
 
-          <div className="field" style={{ flex: '2 1 280px', marginBottom: 0 }}>
+          <div className="field" style={{ marginBottom: 0 }}>
             <label htmlFor="note">Note (optional)</label>
             <input
               id="note"
@@ -128,7 +122,7 @@ export default function NewRestockRequest() {
             />
           </div>
 
-          <div className="filter-actions" style={{ alignSelf: 'flex-end' }}>
+          <div className="request-bar-actions">
             <button className="btn" onClick={() => navigate('/restocks')}>Cancel</button>
             <button className="btn btn-primary" onClick={save} disabled={busy}>
               {busy ? 'Raising...' : 'Raise request'}
@@ -136,27 +130,36 @@ export default function NewRestockRequest() {
           </div>
         </div>
 
-        {(pickedList.length > 0 || manual.length > 0) && (
-          <details className="selected-summary" open>
-            <summary>
-              Selected: {pickedList.length + manual.length} line
-              {pickedList.length + manual.length === 1 ? '' : 's'}, {totalItems} item
+        <div className="request-bar-foot">
+          <span className="field-hint" style={{ margin: 0 }}>
+            {destination
+              ? 'Stock at this location is highlighted as you browse.'
+              : 'Choose a location to see what is already there as you browse.'}
+          </span>
+
+          {(pickedList.length > 0 || manual.length > 0) && (
+            <span className="request-count">
+              {pickedList.length + manual.length} line
+              {pickedList.length + manual.length === 1 ? '' : 's'} · {totalItems} item
               {totalItems === 1 ? '' : 's'}
-            </summary>
-            <div className="selected-chips">
-              {pickedList.map(([variantId, v]) => (
-                <span key={variantId} className="selected-chip">
-                  <strong>{v.qty}</strong> {v.name}
-                  <button className="chip-x" onClick={() => removePicked(variantId)}>x</button>
-                </span>
-              ))}
-              {manual.filter((m) => m.name.trim()).map((m, i) => (
-                <span key={`m-${i}`} className="selected-chip">
-                  <strong>{m.qty}</strong> {m.name}
-                </span>
-              ))}
-            </div>
-          </details>
+            </span>
+          )}
+        </div>
+
+        {(pickedList.length > 0 || manual.length > 0) && (
+          <div className="selected-chips">
+            {pickedList.map(([variantId, v]) => (
+              <span key={variantId} className="selected-chip">
+                <strong>{v.qty}</strong> {v.name}
+                <button className="chip-x" onClick={() => removePicked(variantId)}>x</button>
+              </span>
+            ))}
+            {manual.filter((m) => m.name.trim()).map((m, i) => (
+              <span key={`m-${i}`} className="selected-chip">
+                <strong>{m.qty}</strong> {m.name}
+              </span>
+            ))}
+          </div>
         )}
       </div>
 

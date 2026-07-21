@@ -3,11 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/Modal'
+import { nextReference } from '../lib/references'
 
 const formatDate = (d) =>
   d ? new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'
-
-const ref = (prefix) => `${prefix}-${Date.now().toString(36).toUpperCase()}`
 
 export default function Restocks() {
   const { profile, org } = useAuth()
@@ -386,7 +385,7 @@ function FulfilModal({ request, locations, profile, onClose, onSaved }) {
       .from('restock_orders')
       .insert({
         org_id: profile.org_id,
-        reference: ref('RST'),
+        reference: await nextReference('restock_order', 'RO-'),
         request_id: request.id,
         source_location_id: source,
         destination_location_id: request.destination_location_id ?? null,
