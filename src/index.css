@@ -601,3 +601,49 @@ a.btn { display: inline-block; text-decoration: none; }
   border-radius: 6px; border: 1px solid var(--blush); display: block;
 }
 .thumb-blank { background: var(--cream); }
+
+/* ---------- Product list ---------- */
+.product-list { display: flex; flex-direction: column; gap: 8px; }
+.product-row { border: 1px solid var(--blush); border-radius: 10px; overflow: hidden; }
+.product-head {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  background: var(--surface); border: none; padding: 12px 14px;
+  text-align: left; font-family: inherit;
+}
+.product-head:hover { background: var(--cream); }
+.product-main { flex: 1 1 auto; min-width: 0; }
+.product-main .cell-strong, .product-main .cell-sub { display: block; }
+.product-price { font-size: 13px; color: var(--muted); white-space: nowrap; }
+.chev {
+  flex: none; width: 16px; font-size: 18px; color: var(--muted);
+  transition: transform .15s ease; display: inline-block;
+}
+.chev.open { transform: rotate(90deg); }
+
+.stock-chip {
+  flex: none; padding: 3px 10px; border-radius: 20px; font-size: 11.5px; font-weight: 700;
+  background: #e7f0e8; color: #2f5d3a; white-space: nowrap;
+}
+.stock-chip.zero { background: var(--blush); color: var(--red); }
+
+.product-variants { border-top: 1px solid var(--blush); padding: 12px 14px; background: var(--cream); }
+.stock-lines { display: flex; flex-direction: column; gap: 3px; }
+.stock-line { display: flex; justify-content: space-between; gap: 12px; min-width: 140px; }
+.stock-total { border-top: 1px solid var(--blush); padding-top: 3px; margin-top: 2px; }
+.stock-num { font-weight: 700; font-size: 13px; }
+.stock-num.zero { color: var(--red); }
+
+@media (max-width: 620px) {
+  .product-price { display: none; }
+}
+
+.browse-list { max-height: 380px; overflow-y: auto; }
+.browse-variant {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 0; border-bottom: 1px solid var(--blush);
+}
+.browse-variant:last-child { border-bottom: none; }
+.browse-variant-main { flex: 1 1 auto; min-width: 0; }
+.browse-variant-main .cell-strong, .browse-variant-main .cell-sub { display: block; }
+.browse-stock { display: flex; flex-direction: column; gap: 2px; text-align: right; flex: none; }
+.browse-variant .input.mini { flex: none; width: 70px; }

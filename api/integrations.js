@@ -408,9 +408,20 @@ async function syncBigCommerceProducts(sb, orgId, creds) {
     problems.push(`Could not read brands: ${err.message}`)
   }
 
+  // Stock is held per location. Find the IMS location mapped to BigCommerce so
+  // synced levels land somewhere meaningful.
+  const { data: locs } = await sb
+    .from('locations')
+    .select('id, external_refs')
+    .eq('org_id', orgId)
+
+  const bcLocation = (locs ?? []).find((l) => l.external_refs?.bigcommerce)?.id ?? null
+
   let page = 1
   let products = 0
   let variants = 0
+  let stockRows = 0
+  const stock = []
   const now = new Date().toISOString()
 
   while (page <= 20) {
@@ -467,14 +478,31 @@ async function syncBigCommerceProducts(sb, orgId, creds) {
         last_synced_at: now,
       }))
 
-      const { error: vErr } = await sb
+      const { data: savedVariants, error: vErr } = await sb
         .from('variants')
         .upsert(rows, { onConflict: 'org_id,external_source,external_id' })
+        .select('id, external_id')
 
       if (vErr) {
         if (problems.length < 3) problems.push(vErr.message)
       } else {
         variants += rows.length
+
+        if (bcLocation) {
+          for (const v of vs) {
+            const saved = (savedVariants ?? []).find((x) => x.external_id === String(v.id))
+            if (!saved) continue
+            const level = v.inventory_level ?? p.inventory_level
+            if (level == null) continue
+            stock.push({
+              org_id: orgId,
+              variant_id: saved.id,
+              location_id: bcLocation,
+              on_hand: Number(level) || 0,
+              updated_at: now,
+            })
+          }
+        }
       }
     }
 
@@ -482,7 +510,26 @@ async function syncBigCommerceProducts(sb, orgId, creds) {
     page += 1
   }
 
-  return { products, variants, error: problems.length ? problems[0] : null }
+  // Write stock in batches.
+  for (let i = 0; i < stock.length; i += 200) {
+    const batch = stock.slice(i, i + 200)
+    const { error: sErr } = await sb
+      .from('inventory_levels')
+      .upsert(batch, { onConflict: 'variant_id,location_id' })
+    if (sErr) {
+      if (problems.length < 3) problems.push(`Stock: ${sErr.message}`)
+      break
+    }
+    stockRows += batch.length
+  }
+
+  return {
+    products,
+    variants,
+    stockRows,
+    stockLocationMissing: !bcLocation,
+    error: problems.length ? problems[0] : null,
+  }
 }
 
 export default async function handler(req, res) {

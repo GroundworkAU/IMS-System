@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/Modal'
-import ProductPicker from '../components/ProductPicker'
+import CatalogueBrowser from '../components/CatalogueBrowser'
 
 const formatDate = (d) =>
   d ? new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'
@@ -382,6 +382,7 @@ function NewRequestModal({ locations, profile, onClose, onSaved }) {
   const [note, setNote] = useState('')
   const [lines, setLines] = useState([])
   const [manual, setManual] = useState(false)
+  const [picked, setPicked] = useState({})   // { variantId: {name, sku, qty} }
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
 
@@ -390,7 +391,16 @@ function NewRequestModal({ locations, profile, onClose, onSaved }) {
 
   async function save() {
     if (!destination) return setError('Choose where the stock is needed.')
-    const clean = lines.filter((l) => l.name.trim() && Number(l.qty) > 0)
+
+    const fromCatalogue = Object.entries(picked).map(([variantId, v]) => ({
+      variant_id: variantId,
+      name: v.name,
+      sku: v.sku,
+      qty: v.qty,
+    }))
+    const manualLines = lines.filter((l) => l.name.trim() && Number(l.qty) > 0)
+    const clean = [...fromCatalogue, ...manualLines]
+
     if (clean.length === 0) return setError('Add at least one item with a quantity.')
 
     setBusy(true)
@@ -456,28 +466,21 @@ function NewRequestModal({ locations, profile, onClose, onSaved }) {
 
       <h4 className="sub-label">What do you need?</h4>
 
-      <ProductPicker
-        onPick={(item) =>
-          setLines((ls) =>
-            ls.some((l) => l.variant_id && l.variant_id === item.variant_id)
-              ? ls
-              : [...ls, { ...item, qty: 1 }]
-          )
-        }
+      <CatalogueBrowser
+        selected={picked}
+        onChange={setPicked}
+        destinationId={destination || null}
       />
 
-      {lines.length === 0 && !manual && (
-        <p className="field-hint">
-          Search for what you need above, or{' '}
-          <button className="linklike" onClick={() => {
-            setManual(true)
-            setLines([{ name: '', sku: '', qty: 1, variant_id: null }])
-          }}>
-            add an item by hand
-          </button>{' '}
-          if it is not in the catalogue yet.
-        </p>
-      )}
+      <p className="field-hint">
+        Not in the catalogue yet?{' '}
+        <button className="linklike" onClick={() => {
+          setManual(true)
+          setLines([...lines, { name: '', sku: '', qty: 1, variant_id: null }])
+        }}>
+          Add an item by hand
+        </button>
+      </p>
 
       <div className="line-picker" style={{ marginTop: 12 }}>
         {lines.map((l, i) => (
