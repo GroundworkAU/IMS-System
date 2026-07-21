@@ -136,23 +136,73 @@ export default function CatalogueBrowser({ selected, onChange, destinationId, fu
               0
             )
             return (
-              <div key={p.id} className="product-row">
-                <button className="product-head" onClick={() => toggle(p.id)}>
-                  <span className={'chev' + (isOpen ? ' open' : '')}>›</span>
-                  {p.image_url
-                    ? <img className="thumb" src={p.image_url} alt="" loading="lazy" />
-                    : <div className="thumb thumb-blank" />}
-                  <span className="product-main">
-                    <span className="cell-strong">{p.name || 'Unnamed product'}</span>
-                    <span className="cell-sub">
+              <div
+                key={p.id}
+                className="product-row"
+                style={{ border: '1px solid #F2E0D5', borderRadius: 10, background: '#fff' }}
+              >
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => toggle(p.id)}
+                  onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && toggle(p.id)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    padding: '12px 14px',
+                    cursor: 'pointer',
+                    minHeight: 64,
+                  }}
+                >
+                  <span style={{ width: 14, color: '#8a7a6f', fontSize: 18 }}>
+                    {isOpen ? '\u2304' : '\u203a'}
+                  </span>
+
+                  {p.image_url ? (
+                    <img
+                      src={p.image_url}
+                      alt=""
+                      loading="lazy"
+                      style={{
+                        width: 40, height: 40, objectFit: 'cover',
+                        borderRadius: 6, border: '1px solid #F2E0D5', flex: 'none',
+                      }}
+                    />
+                  ) : (
+                    <span
+                      style={{
+                        width: 40, height: 40, borderRadius: 6,
+                        border: '1px solid #F2E0D5', background: '#FBF7F1', flex: 'none',
+                      }}
+                    />
+                  )}
+
+                  <span style={{ flex: '1 1 auto', minWidth: 0 }}>
+                    <span
+                      style={{
+                        display: 'block', fontWeight: 600, color: '#2D0D05', fontSize: 14,
+                      }}
+                    >
+                      {p.name || 'Unnamed product'}
+                    </span>
+                    <span style={{ display: 'block', fontSize: 12, color: '#8a7a6f' }}>
                       {p.external_brand || 'No brand'}
-                      {picked > 0 && ` · ${picked} selected`}
+                      {picked > 0 && ` \u00b7 ${picked} selected`}
                     </span>
                   </span>
-                  <span className={'stock-chip' + (totalStock === 0 ? ' zero' : '')}>
-                    {totalStock} online
+
+                  <span
+                    style={{
+                      flex: 'none', padding: '3px 10px', borderRadius: 20,
+                      fontSize: 11.5, fontWeight: 700, whiteSpace: 'nowrap',
+                      background: totalStock === 0 ? '#F2E0D5' : '#e7f0e8',
+                      color: totalStock === 0 ? '#b3341c' : '#2f5d3a',
+                    }}
+                  >
+                    {totalStock} in stock
                   </span>
-                </button>
+                </div>
 
                 {isOpen && (
                   <div className="product-variants">
