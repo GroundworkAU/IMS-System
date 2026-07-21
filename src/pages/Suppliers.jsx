@@ -20,6 +20,7 @@ export default function Suppliers() {
   const [busy, setBusy] = useState(false)
   const [supplierModal, setSupplierModal] = useState(null) // {mode, values, id}
   const [brandModal, setBrandModal] = useState(null)
+  const [linking, setLinking] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -258,14 +259,24 @@ export default function Suppliers() {
       <div className="card">
         <div className="card-head">
           <h3 className="section-title" style={{ margin: 0 }}>Brands</h3>
-          <button
-            className="btn btn-primary"
-            onClick={() =>
-              setBrandModal({ values: { name: '', supplier_id: '', is_active: true }, id: null })
-            }
-          >
-            Add brand
-          </button>
+          <div className="search-wrap">
+            {brands.some((b) => !b.supplier_id) && (
+              <button className="btn" onClick={() => setLinking(true)}>
+                Link brands to suppliers
+                <span className="tab-count" style={{ marginLeft: 6 }}>
+                  {brands.filter((b) => !b.supplier_id).length}
+                </span>
+              </button>
+            )}
+            <button
+              className="btn btn-primary"
+              onClick={() =>
+                setBrandModal({ values: { name: '', supplier_id: '', is_active: true }, id: null })
+              }
+            >
+              Add brand
+            </button>
+          </div>
         </div>
 
         {loading ? (
@@ -325,6 +336,19 @@ export default function Suppliers() {
           busy={busy}
           onClose={() => setSupplierModal(null)}
           onSave={saveSupplier}
+        />
+      )}
+
+      {linking && (
+        <BulkLinkModal
+          brands={brands}
+          suppliers={suppliers}
+          onClose={() => setLinking(false)}
+          onSaved={(n) => {
+            setLinking(false)
+            setStatus({ type: 'ok', text: `Linked ${n} brand${n === 1 ? '' : 's'}.` })
+            load()
+          }}
         />
       )}
 
@@ -470,6 +494,121 @@ function BrandModal({ initial, id, suppliers, busy, onClose, onSave }) {
           <span>Active. Untick to hide this brand from new orders.</span>
         </label>
       </div>
+    </Modal>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Link several brands to their suppliers in one pass, rather than opening each
+// brand in turn. Suggests a supplier where the names look like a match.
+// ---------------------------------------------------------------------------
+function BulkLinkModal({ brands, suppliers, onClose, onSaved }) {
+  const [showAll, setShowAll] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  // A light suggestion: exact name match, or one name containing the other.
+  const suggest = (brandName) => {
+    const b = (brandName || '').trim().toLowerCase()
+    if (!b) return ''
+    const exact = suppliers.find((s) => s.name.trim().toLowerCase() === b)
+    if (exact) return exact.id
+    const partial = suppliers.find((s) => {
+      const n = s.name.trim().toLowerCase()
+      return n.includes(b) || b.includes(n)
+    })
+    return partial ? partial.id : ''
+  }
+
+  const rows = brands.filter((b) => showAll || !b.supplier_id)
+
+  const [choices, setChoices] = useState(() => {
+    const start = {}
+    for (const b of brands) start[b.id] = b.supplier_id || suggest(b.name)
+    return start
+  })
+
+  const changed = brands.filter(
+    (b) => (choices[b.id] || null) !== (b.supplier_id || null)
+  )
+
+  async function save() {
+    if (changed.length === 0) return onSaved(0)
+    setBusy(true)
+    setError(null)
+
+    for (const b of changed) {
+      const { error: uErr } = await supabase
+        .from('brands')
+        .update({ supplier_id: choices[b.id] || null })
+        .eq('id', b.id)
+      if (uErr) { setBusy(false); return setError(uErr.message) }
+    }
+
+    setBusy(false)
+    onSaved(changed.length)
+  }
+
+  return (
+    <Modal
+      title="Link brands to suppliers"
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={save} disabled={busy}>
+            {busy
+              ? 'Saving...'
+              : changed.length
+                ? `Save ${changed.length} change${changed.length === 1 ? '' : 's'}`
+                : 'Save'}
+          </button>
+        </>
+      }
+    >
+      <p className="field-hint" style={{ marginTop: 0 }}>
+        Set the supplier for each brand, then save them all at once. Where a brand and supplier
+        share a name we have suggested a match ~ check it before saving.
+      </p>
+
+      <label className="check-row" style={{ marginBottom: 14 }}>
+        <input
+          type="checkbox"
+          checked={showAll}
+          onChange={(e) => setShowAll(e.target.checked)}
+        />
+        <span>Show brands that are already linked</span>
+      </label>
+
+      {rows.length === 0 ? (
+        <p className="field-hint">Every brand has a supplier.</p>
+      ) : (
+        <div className="link-list">
+          {rows.map((b) => {
+            const isSuggestion = !b.supplier_id && choices[b.id]
+            return (
+              <div key={b.id} className="link-row">
+                <span className="link-brand">
+                  <span className="cell-strong">{b.name}</span>
+                  {isSuggestion && <span className="suggest-tag">suggested</span>}
+                </span>
+                <select
+                  className="input"
+                  value={choices[b.id] || ''}
+                  onChange={(e) => setChoices({ ...choices, [b.id]: e.target.value })}
+                >
+                  <option value="">No supplier</option>
+                  {suppliers.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {error && <div className="auth-msg err">{error}</div>}
     </Modal>
   )
 }

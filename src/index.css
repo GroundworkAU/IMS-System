@@ -773,3 +773,20 @@ a.btn { display: inline-block; text-decoration: none; }
   .request-bar-fields { grid-template-columns: 1fr; }
   .request-bar-actions { justify-content: flex-end; }
 }
+
+/* ---------- Bulk linking ---------- */
+.link-list { display: flex; flex-direction: column; gap: 8px; max-height: 46vh; overflow-y: auto; }
+.link-row {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: center;
+  padding-bottom: 8px; border-bottom: 1px solid var(--cream);
+}
+.link-row:last-child { border-bottom: none; }
+.link-brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.suggest-tag {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  background: #fbead9; color: #9a5b16; border-radius: 20px; padding: 2px 8px; white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+  .link-row { grid-template-columns: 1fr; gap: 6px; }
+}
