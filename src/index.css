@@ -926,3 +926,9 @@ a.btn { display: inline-block; text-decoration: none; }
   gap: 16px; flex-wrap: wrap; margin-top: 16px;
 }
 .page-actions-summary { display: flex; gap: 28px; flex-wrap: wrap; font-size: 13.5px; }
+
+/* ---------- Finished requests ---------- */
+.closed-dest { font-weight: 400; color: var(--muted); }
+.closed-figures { display: flex; gap: 6px; flex: none; align-items: center; }
+.closed-group { margin-bottom: 16px; }
+.closed-group:last-child { margin-bottom: 0; }

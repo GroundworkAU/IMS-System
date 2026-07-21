@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import Modal from '../components/Modal'
 import { nextReference } from '../lib/references'
 import LineGroups from '../components/LineGroups'
+import ClosedRequestRow from '../components/ClosedRequestRow'
 
 const formatDate = (d) =>
   d ? new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'
@@ -75,6 +76,10 @@ export default function Restocks() {
   useEffect(() => { load() }, [load])
 
   const drafts = requests.filter((r) => r.status === 'draft')
+  const finished = requests.filter((r) => r.status === 'closed' || r.status === 'fulfilled')
+  const live = requests.filter(
+    (r) => !['draft', 'closed', 'fulfilled'].includes(r.status)
+  )
   const openRequests = requests.filter((r) => r.status === 'open' || r.status === 'partly_fulfilled')
   const openOrders = orders.filter((o) => ['draft', 'sent', 'discrepancy'].includes(o.status))
 
@@ -199,7 +204,10 @@ export default function Restocks() {
         <div className="card-head">
           <div className="tabs" style={{ margin: 0, border: 'none' }}>
             {[
-              { key: 'requests', label: 'Requests', count: requests.length - drafts.length },
+              { key: 'requests', label: 'Requests', count: live.length },
+              ...(finished.length
+                ? [{ key: 'finished', label: 'Finished', count: finished.length }]
+                : []),
               { key: 'drafts', label: 'Drafts', count: drafts.length },
               { key: 'orders', label: 'Restock orders', count: orders.length },
               ...(inProgress.length
@@ -223,6 +231,17 @@ export default function Restocks() {
 
         {loading ? (
           <p className="page-desc">Loading...</p>
+        ) : tab === 'finished' ? (
+          <div className="product-list">
+            {finished.map((r) => (
+              <ClosedRequestRow
+                key={r.id}
+                request={r}
+                images={images}
+                onReopen={r.status === 'closed' ? reopenRequest : null}
+              />
+            ))}
+          </div>
         ) : tab === 'progress' ? (
           <div className="return-list">
             {inProgress.map((o) => (
@@ -312,7 +331,7 @@ export default function Restocks() {
             </div>
           )
         ) : tab === 'requests' ? (
-          requests.filter((r) => r.status !== 'draft').length === 0 ? (
+          live.length === 0 ? (
             <div className="empty-state">
               <p>No restock requests yet.</p>
               <p className="page-desc">
@@ -321,7 +340,7 @@ export default function Restocks() {
             </div>
           ) : (
             <div className="return-list">
-              {requests.filter((r) => r.status !== 'draft').map((r) => (
+              {live.map((r) => (
                 <article key={r.id} className="return-card">
                   <header className="return-card-head">
                     <div className="return-ident">
