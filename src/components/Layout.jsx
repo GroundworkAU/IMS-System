@@ -9,12 +9,12 @@ const NAV = [
     group: 'Purchasing',
     items: [
       { to: '/purchase-orders', label: 'Purchase Orders' },
-      { to: '/products', label: 'Products' },
     ],
   },
   {
     group: 'Inventory',
     items: [
+      { to: '/products', label: 'Products' },
       { to: '/restocks', label: 'Restocks' },
       { to: '/inbound', label: 'Inbound Shipments' },
       { to: '/goods-inwards', label: 'Goods Inwards' },
