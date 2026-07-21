@@ -111,15 +111,6 @@ export default function CatalogueBrowser({ selected, onChange, destinationId, fu
         </div>
       )}
 
-      {!loading && !error && (
-        <details className="debug-peek">
-          <summary>
-            Showing {products.length} product{products.length === 1 ? '' : 's'} ~ tap to see the raw data
-          </summary>
-          <pre>{JSON.stringify(products.slice(0, 2), null, 1)}</pre>
-        </details>
-      )}
-
       {loading ? (
         <p className="field-hint">Loading catalogue...</p>
       ) : products.length === 0 ? (
@@ -136,70 +127,29 @@ export default function CatalogueBrowser({ selected, onChange, destinationId, fu
               0
             )
             return (
-              <div
-                key={p.id}
-                className="product-row"
-                style={{ border: '1px solid #F2E0D5', borderRadius: 10, background: '#fff' }}
-              >
+              <div key={p.id} className="product-row">
                 <div
+                  className="product-head"
                   role="button"
                   tabIndex={0}
                   onClick={() => toggle(p.id)}
                   onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && toggle(p.id)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 12,
-                    padding: '12px 14px',
-                    cursor: 'pointer',
-                    minHeight: 64,
-                  }}
                 >
-                  <span style={{ width: 14, color: '#8a7a6f', fontSize: 18 }}>
-                    {isOpen ? '\u2304' : '\u203a'}
-                  </span>
+                  <span className={'chev' + (isOpen ? ' open' : '')}>›</span>
 
-                  {p.image_url ? (
-                    <img
-                      src={p.image_url}
-                      alt=""
-                      loading="lazy"
-                      style={{
-                        width: 40, height: 40, objectFit: 'cover',
-                        borderRadius: 6, border: '1px solid #F2E0D5', flex: 'none',
-                      }}
-                    />
-                  ) : (
-                    <span
-                      style={{
-                        width: 40, height: 40, borderRadius: 6,
-                        border: '1px solid #F2E0D5', background: '#FBF7F1', flex: 'none',
-                      }}
-                    />
-                  )}
+                  {p.image_url
+                    ? <img className="thumb" src={p.image_url} alt="" loading="lazy" />
+                    : <span className="thumb thumb-blank" />}
 
-                  <span style={{ flex: '1 1 auto', minWidth: 0 }}>
-                    <span
-                      style={{
-                        display: 'block', fontWeight: 600, color: '#2D0D05', fontSize: 14,
-                      }}
-                    >
-                      {p.name || 'Unnamed product'}
-                    </span>
-                    <span style={{ display: 'block', fontSize: 12, color: '#8a7a6f' }}>
+                  <span className="product-main">
+                    <span className="cell-strong">{p.name || 'Unnamed product'}</span>
+                    <span className="cell-sub">
                       {p.external_brand || 'No brand'}
-                      {picked > 0 && ` \u00b7 ${picked} selected`}
+                      {picked > 0 && ` · ${picked} selected`}
                     </span>
                   </span>
 
-                  <span
-                    style={{
-                      flex: 'none', padding: '3px 10px', borderRadius: 20,
-                      fontSize: 11.5, fontWeight: 700, whiteSpace: 'nowrap',
-                      background: totalStock === 0 ? '#F2E0D5' : '#e7f0e8',
-                      color: totalStock === 0 ? '#b3341c' : '#2f5d3a',
-                    }}
-                  >
+                  <span className={'stock-chip' + (totalStock === 0 ? ' zero' : '')}>
                     {totalStock} in stock
                   </span>
                 </div>

@@ -705,3 +705,6 @@ a.btn { display: inline-block; text-decoration: none; }
 
 /* Catalogue can breathe now that it has the full width */
 .browse-tall { max-height: 70vh; }
+
+/* product-head is a div now, so give it the button affordances */
+.product-head { min-height: 64px; }

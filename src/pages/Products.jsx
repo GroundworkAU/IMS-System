@@ -70,9 +70,14 @@ export default function Products() {
     } else {
       const bits = [`Brought in ${res.products} products and ${res.variants} variants`]
       if (res.stockLocationMissing) {
-        bits.push('stock was skipped ~ link a location to BigCommerce on the Locations page')
+        bits.push(
+          'no stock was written ~ open Locations, edit the location and set ' +
+          '"Stock figures come from" to BigCommerce'
+        )
       } else if (res.stockRows) {
         bits.push(`stock updated on ${res.stockRows} lines`)
+      } else {
+        bits.push('no stock figures came back from the platform')
       }
       setStatus({ type: res.stockLocationMissing ? 'err' : 'ok', text: bits.join(', ') + '.' })
     }
