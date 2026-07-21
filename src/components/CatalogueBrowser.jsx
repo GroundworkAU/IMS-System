@@ -112,9 +112,12 @@ export default function CatalogueBrowser({ selected, onChange, destinationId, fu
       )}
 
       {!loading && !error && (
-        <p className="field-hint" style={{ marginTop: 0 }}>
-          Showing {products.length} product{products.length === 1 ? '' : 's'}.
-        </p>
+        <details className="debug-peek">
+          <summary>
+            Showing {products.length} product{products.length === 1 ? '' : 's'} ~ tap to see the raw data
+          </summary>
+          <pre>{JSON.stringify(products.slice(0, 2), null, 1)}</pre>
+        </details>
       )}
 
       {loading ? (
