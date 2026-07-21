@@ -593,3 +593,5 @@ a.btn { display: inline-block; text-decoration: none; }
 
 .order-link { color: var(--deep-brown); text-decoration: underline; text-underline-offset: 2px; }
 .order-link:hover { color: var(--dark-brown); }
+
+.item-qty-bad { background: #f7e2de; border-color: #eec9c1; color: var(--red); }

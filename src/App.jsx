@@ -11,6 +11,7 @@ import PurchaseOrders from './pages/PurchaseOrders'
 import Suppliers from './pages/Suppliers'
 import Products from './pages/Products'
 import Locations from './pages/Locations'
+import Restocks from './pages/Restocks'
 import Inbound from './pages/Inbound'
 import GoodsInwards from './pages/GoodsInwards'
 import GoodsOutwards from './pages/GoodsOutwards'
@@ -40,6 +41,7 @@ export default function App() {
         <Route path="/suppliers" element={<Suppliers />} />
         <Route path="/products" element={<Products />} />
         <Route path="/locations" element={<Locations />} />
+        <Route path="/restocks" element={<Restocks />} />
         <Route path="/inbound" element={<Inbound />} />
         <Route path="/goods-inwards" element={<GoodsInwards />} />
         <Route path="/goods-outwards" element={<GoodsOutwards />} />
