@@ -20,7 +20,7 @@ export default function Login() {
     const { error } = await signInWithEmail(email.trim())
     setBusy(false)
     if (error) setStatus({ type: 'err', text: error.message })
-    else setStatus({ type: 'ok', text: 'Check your inbox — we sent you a sign-in link.' })
+    else setStatus({ type: 'ok', text: 'Check your inbox ~ we sent you a sign-in link.' })
   }
 
   return (
@@ -34,7 +34,7 @@ export default function Login() {
           </div>
         </div>
         <h1 className="auth-title">Sign in</h1>
-        <p className="auth-sub">We'll email you a secure link — no password to remember.</p>
+        <p className="auth-sub">We'll email you a secure link ~ no password to remember.</p>
 
         <div className="field">
           <label htmlFor="email">Work email</label>

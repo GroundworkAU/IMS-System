@@ -11,24 +11,24 @@ export default function Dashboard() {
         <h2 className="page-title">{name ? `Welcome, ${name}` : 'Dashboard'}</h2>
         <p className="page-desc">
           Incoming brand orders, allocation across locations, goods inwards, and customer
-          service — one place. The live metrics below switch on as each module comes online.
+          service ~ one place. The live metrics below switch on as each module comes online.
         </p>
       </div>
 
       <div className="grid grid-3">
         <div className="card">
           <div className="stat-label">Open purchase orders</div>
-          <div className="stat-value">—</div>
+          <div className="stat-value">-</div>
           <div className="stat-note">Awaiting confirmation, upload or landing</div>
         </div>
         <div className="card">
           <div className="stat-label">Shipments in transit</div>
-          <div className="stat-value">—</div>
+          <div className="stat-value">-</div>
           <div className="stat-note">Tracked inbound + inter-location transfers</div>
         </div>
         <div className="card">
           <div className="stat-label">Goods inwards to check</div>
-          <div className="stat-value">—</div>
+          <div className="stat-value">-</div>
           <div className="stat-note">Submitted, awaiting warehouse check-off</div>
         </div>
       </div>

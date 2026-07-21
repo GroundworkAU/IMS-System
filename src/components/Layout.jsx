@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
@@ -45,46 +46,86 @@ function titleFor(pathname) {
   return 'IMS'
 }
 
+function SidebarInner({ org, onNavigate, onSignOut }) {
+  return (
+    <aside className="sidebar">
+      <div className="brand">
+        <div className="brand-mark">IMS</div>
+        <div>
+          <div className="brand-name">IMS System</div>
+          <div className="brand-sub">Inventory management</div>
+        </div>
+      </div>
+
+      <nav>
+        {NAV.map((g) => (
+          <div key={g.group}>
+            <div className="nav-group-label">{g.group}</div>
+            {g.items.map((i) => (
+              <NavLink
+                key={i.to}
+                to={i.to}
+                end={i.end}
+                onClick={onNavigate}
+                className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}
+              >
+                <span className="nav-dot" />
+                {i.label}
+              </NavLink>
+            ))}
+          </div>
+        ))}
+      </nav>
+
+      <div className="sidebar-foot">
+        <div>{org?.name || 'Setting up'}</div>
+        {onSignOut && (
+          <button className="linklike" style={{ color: '#b09a8c', marginTop: 8 }} onClick={onSignOut}>
+            Sign out
+          </button>
+        )}
+      </div>
+    </aside>
+  )
+}
+
 export default function Layout() {
   const { user, profile, org, signOut } = useAuth()
   const { pathname } = useLocation()
+  const [drawerOpen, setDrawerOpen] = useState(false)
+
   const email = user?.email ?? ''
   const initials = (profile?.full_name || email || '?').trim().slice(0, 1).toUpperCase()
 
   return (
     <div className="app">
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-mark">IMS</div>
-          <div>
-            <div className="brand-name">IMS System</div>
-            <div className="brand-sub">PAFC Inventory</div>
+      <SidebarInner org={org} />
+
+      {drawerOpen && (
+        <>
+          <div className="drawer-backdrop" onClick={() => setDrawerOpen(false)} />
+          <div className="drawer">
+            <SidebarInner
+              org={org}
+              onNavigate={() => setDrawerOpen(false)}
+              onSignOut={signOut}
+            />
           </div>
-        </div>
-
-        <nav>
-          {NAV.map((g) => (
-            <div key={g.group}>
-              <div className="nav-group-label">{g.group}</div>
-              {g.items.map((i) => (
-                <NavLink
-                  key={i.to}
-                  to={i.to}
-                  end={i.end}
-                  className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}
-                >
-                  <span className="nav-dot" />
-                  {i.label}
-                </NavLink>
-              ))}
-            </div>
-          ))}
-        </nav>
-
-        <div className="sidebar-foot">Phase 1 · foundation</div>
-      </aside>
+        </>
+      )}
 
       <div className="main">
+        <div className="mobile-bar">
+          <button
+            className="hamburger"
+            aria-label="Open menu"
+            onClick={() => setDrawerOpen(true)}
+          >
+            <span /><span /><span />
+          </button>
+          <div className="mobile-word">IMS System</div>
+        </div>
+
         <header className="topbar">
           <h1>{titleFor(pathname)}</h1>
           <div className="user-chip">
@@ -93,6 +134,8 @@ export default function Layout() {
             <button className="btn" onClick={signOut}>Sign out</button>
           </div>
         </header>
+        <div className="checker-strip" />
+
         <main className="content">
           <Outlet />
         </main>
