@@ -102,6 +102,12 @@ export default function FulfilRequest() {
   const lines = request?.restock_request_lines ?? []
   const outstanding = (l) => Math.max(0, l.qty_requested - (l.qty_fulfilled ?? 0))
   const available = (l) => (source && l.variant_id ? stock[l.variant_id]?.[source] ?? 0 : null)
+  const stockAt = (l, locationId) =>
+    l.variant_id ? stock[l.variant_id]?.[locationId] ?? 0 : null
+
+  // Where else could this come from? Helps decide whether to split a request
+  // across locations.
+  const otherLocations = locations.filter((l) => l.id !== request?.destination_location_id)
 
   // Group the requested lines under their product, the way the product pages
   // show them, so a guernsey in six sizes reads as one block.
@@ -305,9 +311,8 @@ export default function FulfilRequest() {
 
         <div className="request-bar-foot">
           <span className="field-hint" style={{ margin: 0 }}>
-            {source
-              ? 'Stock at that location is shown against each line.'
-              : 'Choose where you are sending from to see what you have.'}
+            Sending from one location at a time. Anything left outstanding can be fulfilled from
+            another location afterwards, as its own restock order.
           </span>
           <span className="request-count">
             {linesSending} line{linesSending === 1 ? '' : 's'} · {totalSending} item
@@ -355,7 +360,14 @@ export default function FulfilRequest() {
                         <th>SKU</th>
                         <th className="num">Asked for</th>
                         <th className="num">Already sent</th>
-                        <th className="num">Available</th>
+                        {otherLocations.map((loc) => (
+                          <th
+                            key={loc.id}
+                            className={'num' + (loc.id === source ? ' destination' : '')}
+                          >
+                            {loc.name}
+                          </th>
+                        ))}
                         <th className="num">Sending</th>
                       </tr>
                     </thead>
@@ -371,13 +383,21 @@ export default function FulfilRequest() {
                             <td className="cell-sub">{l.sku || 'No SKU'}</td>
                             <td className="num">{l.qty_requested}</td>
                             <td className="num">{l.qty_fulfilled || 0}</td>
-                            <td
-                              className={
-                                'num' + (have === 0 ? ' zero' : have < 0 ? ' negative' : '')
-                              }
-                            >
-                              {have == null ? '~' : have}
-                            </td>
+                            {otherLocations.map((loc) => {
+                              const at = stockAt(l, loc.id)
+                              return (
+                                <td
+                                  key={loc.id}
+                                  className={
+                                    'num' +
+                                    (loc.id === source ? ' destination' : '') +
+                                    (at === 0 ? ' zero' : at < 0 ? ' negative' : '')
+                                  }
+                                >
+                                  {at == null ? '~' : at}
+                                </td>
+                              )
+                            })}
                             <td className="num">
                               <input
                                 className="input mini"
