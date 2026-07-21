@@ -86,3 +86,13 @@ export async function callIntegrations(payload) {
 export async function fetchPlatformLocations(provider) {
   return callIntegrations({ action: 'locations', provider })
 }
+
+// Pull recent orders from a connected platform into IMS.
+export async function syncOrders(provider = 'bigcommerce') {
+  return callIntegrations({ action: 'sync_orders', provider })
+}
+
+// Fetch (and store) the line items for a single order, on demand.
+export async function loadOrderLines(orderId, provider = 'bigcommerce') {
+  return callIntegrations({ action: 'order_lines', provider, order_id: orderId })
+}

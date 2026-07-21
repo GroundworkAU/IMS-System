@@ -132,6 +132,141 @@ async function fetchRemoteLocations(provider, variant, creds) {
   return []
 }
 
+// ---------------------------------------------------------------------------
+// Order sync. Headers only: line items are fetched on demand when someone opens
+// an order, which keeps the sync fast and avoids a request per order.
+// ---------------------------------------------------------------------------
+async function bcFetch(creds, path) {
+  const res = await fetch(
+    `https://api.bigcommerce.com/stores/${creds.store_hash}${path}`,
+    { headers: { 'X-Auth-Token': creds.access_token, Accept: 'application/json' } }
+  )
+  if (res.status === 204) return []
+  if (!res.ok) throw new Error(`BigCommerce replied ${res.status}.`)
+  return res.json()
+}
+
+async function syncBigCommerceOrders(sb, orgId, creds, sinceDays = 120) {
+  // Make sure we have a channel row to hang orders off.
+  let { data: channel } = await sb
+    .from('sales_channels')
+    .select('id')
+    .match({ org_id: orgId, platform: 'bigcommerce' })
+    .maybeSingle()
+
+  if (!channel) {
+    const { data: created, error } = await sb
+      .from('sales_channels')
+      .insert({ org_id: orgId, name: 'BigCommerce', platform: 'bigcommerce' })
+      .select('id')
+      .single()
+    if (error) throw new Error(error.message)
+    channel = created
+  }
+
+  const since = new Date(Date.now() - sinceDays * 86400000).toISOString()
+  let page = 1
+  let imported = 0
+
+  while (page <= 8) {
+    const orders = await bcFetch(
+      creds,
+      `/v2/orders?limit=250&page=${page}&sort=date_created:desc&min_date_created=${encodeURIComponent(since)}`
+    )
+    if (!Array.isArray(orders) || orders.length === 0) break
+
+    for (const o of orders) {
+      let customerId = null
+      const email = (o.billing_address?.email || '').trim().toLowerCase()
+
+      if (email) {
+        const { data: existing } = await sb
+          .from('customers')
+          .select('id')
+          .eq('org_id', orgId)
+          .ilike('email', email)
+          .maybeSingle()
+
+        if (existing) {
+          customerId = existing.id
+        } else {
+          const { data: newCustomer } = await sb
+            .from('customers')
+            .insert({
+              org_id: orgId,
+              email,
+              first_name: o.billing_address?.first_name ?? null,
+              last_name: o.billing_address?.last_name ?? null,
+              phone: o.billing_address?.phone ?? null,
+            })
+            .select('id')
+            .single()
+          customerId = newCustomer?.id ?? null
+        }
+      }
+
+      await sb.from('orders').upsert(
+        {
+          org_id: orgId,
+          channel_id: channel.id,
+          external_order_id: String(o.id),
+          order_number: String(o.id),
+          customer_id: customerId,
+          status: o.status ?? null,
+          financial_status: o.payment_status ?? null,
+          order_date: o.date_created ? new Date(o.date_created).toISOString() : null,
+          total: Number(o.total_inc_tax ?? 0),
+          raw: {
+            billing_name: [o.billing_address?.first_name, o.billing_address?.last_name]
+              .filter(Boolean).join(' '),
+            email: email || null,
+            phone: o.billing_address?.phone ?? null,
+            items_total: o.items_total ?? null,
+            shipping_city: o.billing_address?.city ?? null,
+          },
+        },
+        { onConflict: 'org_id,channel_id,external_order_id' }
+      )
+      imported += 1
+    }
+
+    if (orders.length < 250) break
+    page += 1
+  }
+
+  return imported
+}
+
+async function loadBigCommerceOrderLines(sb, orgId, creds, orderId) {
+  const { data: order } = await sb
+    .from('orders')
+    .select('id, external_order_id')
+    .match({ org_id: orgId, id: orderId })
+    .maybeSingle()
+
+  if (!order) throw new Error('Order not found.')
+
+  const products = await bcFetch(creds, `/v2/orders/${order.external_order_id}/products`)
+
+  // Replace existing lines so repeat opens do not duplicate.
+  await sb.from('order_lines').delete().match({ org_id: orgId, order_id: order.id })
+
+  const rows = (Array.isArray(products) ? products : []).map((p) => ({
+    org_id: orgId,
+    order_id: order.id,
+    sku: p.sku || null,
+    name: p.name || 'Item',
+    qty: Number(p.quantity ?? 1),
+    unit_price: Number(p.price_inc_tax ?? p.base_price ?? 0),
+  }))
+
+  if (rows.length === 0) return []
+
+  const { data: inserted, error } = await sb.from('order_lines').insert(rows).select('*')
+  if (error) throw new Error(error.message)
+  return inserted
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
@@ -253,6 +388,33 @@ export default async function handler(req, res) {
         return res.status(200).json({ ok: true, locations: result })
       } catch (err) {
         return res.status(200).json({ ok: false, error: err.message, locations: [] })
+      }
+    }
+
+    // --- sync orders from the platform -------------------------------------
+    if (action === 'sync_orders' || action === 'order_lines') {
+      const { data: secret } = await sb
+        .from('integration_secrets')
+        .select('credentials')
+        .match({ org_id: orgId, provider })
+        .maybeSingle()
+
+      if (!secret) return res.status(400).json({ error: 'Not connected yet.' })
+      if (provider !== 'bigcommerce') {
+        return res.status(400).json({ error: 'Order sync currently supports BigCommerce.' })
+      }
+
+      try {
+        if (action === 'sync_orders') {
+          const imported = await syncBigCommerceOrders(sb, orgId, secret.credentials)
+          return res.status(200).json({ ok: true, imported })
+        }
+        const lines = await loadBigCommerceOrderLines(
+          sb, orgId, secret.credentials, req.body.order_id
+        )
+        return res.status(200).json({ ok: true, lines })
+      } catch (err) {
+        return res.status(200).json({ ok: false, error: err.message })
       }
     }
 
