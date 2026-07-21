@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { PLATFORMS } from '../lib/platforms'
+import ConnectionCard from '../components/ConnectionCard'
 
 export default function Settings() {
   const { org, isAdmin, refresh } = useAuth()
@@ -9,11 +10,20 @@ export default function Settings() {
   const [platforms, setPlatforms] = useState([])
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState(null)
+  const [settings, setSettings] = useState([])
+
+  const loadSettings = async () => {
+    const { data } = await supabase
+      .from('integration_settings')
+      .select('provider, variant, status, is_active, last_tested_at, last_error')
+    setSettings(data ?? [])
+  }
 
   useEffect(() => {
     if (org) {
       setName(org.name ?? '')
       setPlatforms(org.platforms ?? [])
+      loadSettings()
     }
   }, [org])
 
@@ -39,6 +49,9 @@ export default function Settings() {
       refresh()
     }
   }
+
+  // 'other' has no API to connect to.
+  const connectable = (org?.platforms ?? []).filter((p) => p !== 'other')
 
   if (!isAdmin) {
     return (
@@ -106,13 +119,29 @@ export default function Settings() {
 
       <div className="card" style={{ marginBottom: 16 }}>
         <h3 className="section-title">Connections</h3>
-        <div className="placeholder-note">
-          Connecting to {platforms.length > 0
-            ? PLATFORMS.filter((p) => platforms.includes(p.value) && p.value !== 'other')
-                .map((p) => p.label).join(' and ') || 'your systems'
-            : 'your systems'} comes next. Once connected, products, stock and orders sync across
-          rather than being entered by hand. API keys are stored securely, never in the browser.
-        </div>
+        {connectable.length === 0 ? (
+          <div className="placeholder-note">
+            Tick the systems you use above and save, then you can connect them here.
+          </div>
+        ) : (
+          <>
+            <p className="page-desc" style={{ marginBottom: 16 }}>
+              Connect each system so products, stock and orders flow through automatically
+              instead of being keyed in. Your keys are stored on our server, never in the
+              browser, and only owners and admins can change them.
+            </p>
+            <div className="connection-list">
+              {connectable.map((p) => (
+                <ConnectionCard
+                  key={p}
+                  provider={p}
+                  setting={settings.find((s) => s.provider === p)}
+                  onChanged={loadSettings}
+                />
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
       <button className="btn btn-primary" onClick={save} disabled={busy}>
