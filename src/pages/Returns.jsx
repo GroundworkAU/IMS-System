@@ -53,7 +53,8 @@ export default function Returns() {
                  profiles:logged_by(full_name),
                  orders(id, order_date, external_order_id,
                         sales_channels(platform),
-                        customers(first_name, last_name, email))`)
+                        customers(first_name, last_name, email)),
+                 return_lines(id, qty, condition, order_lines(name, sku))`)
         .order('created_at', { ascending: false })
         .limit(100),
       supabase.from('locations').select('id, name').eq('is_active', true).order('name'),
@@ -172,8 +173,9 @@ export default function Returns() {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Order</th><th>Customer</th><th>Returned</th>
-                  <th>Logged</th><th>Reason</th><th>Status</th><th></th>
+                  <th>Order</th><th>Customer</th><th>Items returned</th>
+                  <th>Returned</th><th>Logged</th><th>Reason</th>
+                  <th>Status</th><th></th>
                 </tr>
               </thead>
               <tbody>
@@ -185,6 +187,28 @@ export default function Returns() {
                         {r.order_number ? `#${r.order_number}` : '-'}
                       </td>
                       <td>{customerName(r)}</td>
+                      <td>
+                        {(r.return_lines ?? []).length === 0 ? (
+                          <span className="cell-sub">-</span>
+                        ) : (
+                          <div className="item-list">
+                            {r.return_lines.map((l) => (
+                              <div key={l.id} className="item-line">
+                                <span className="item-qty">{l.qty}</span>
+                                <span>
+                                  <span className="item-name">
+                                    {l.order_lines?.name || 'Item'}
+                                  </span>
+                                  <span className="cell-sub">
+                                    {l.order_lines?.sku || 'No SKU'}
+                                    {l.condition ? ` · ${l.condition}` : ''}
+                                  </span>
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </td>
                       <td>{formatDate(r.return_date)}</td>
                       <td>
                         <div>{formatDate(r.created_at)}</div>
