@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { sortVariants } from '../lib/sizes'
 
 const SELECT =
   'id,name,external_brand,image_url,variants(id,sku,option_name,inventory_levels(on_hand,location_id,locations(name)))'
@@ -169,42 +170,57 @@ export default function CatalogueBrowser({ selected, onChange, destinationId, fu
 
                 {isOpen && (
                   <div className="product-variants">
-                    {(p.variants ?? []).map((v) => {
-                      const levels = stockByLocation(v)
-                      return (
-                        <div key={v.id} className="browse-variant">
-                          <span className="browse-variant-main">
-                            <span className="cell-strong">{v.option_name || 'Single'}</span>
-                            <span className="cell-sub">{v.sku || 'No SKU'}</span>
-                          </span>
-
-                          <span className="browse-stock">
-                            {levels.length === 0 ? (
-                              <span className="cell-sub">No locations set up</span>
-                            ) : (
-                              levels.map((l) => (
-                                <span
+                    <table className="variant-table">
+                      <thead>
+                        <tr>
+                          <th>Size</th>
+                          <th>SKU</th>
+                          {locations.map((l) => (
+                            <th
+                              key={l.id}
+                              className={
+                                'num' + (destinationId === l.id ? ' destination' : '')
+                              }
+                            >
+                              {l.name}
+                            </th>
+                          ))}
+                          <th className="num">Request</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sortVariants(p.variants).map((v) => {
+                          const levels = stockByLocation(v)
+                          return (
+                            <tr key={v.id}>
+                              <td className="cell-strong">{v.option_name || 'Single'}</td>
+                              <td className="cell-sub">{v.sku || 'No SKU'}</td>
+                              {levels.map((l) => (
+                                <td
                                   key={l.id}
-                                  className={'stock-at' + (l.isDestination ? ' destination' : '')}
-                                  title={l.isDestination ? 'Where the stock is needed' : undefined}
+                                  className={
+                                    'num' + (l.isDestination ? ' destination' : '') +
+                                    (l.qty === 0 ? ' zero' : '')
+                                  }
                                 >
-                                  {l.name}: <strong>{l.qty}</strong>
-                                </span>
-                              ))
-                            )}
-                          </span>
-
-                          <input
-                            className="input mini"
-                            type="number"
-                            min="0"
-                            placeholder="0"
-                            value={selected[v.id]?.qty ?? ''}
-                            onChange={(e) => setQty(v, p, e.target.value)}
-                          />
-                        </div>
-                      )
-                    })}
+                                  {l.qty}
+                                </td>
+                              ))}
+                              <td className="num">
+                                <input
+                                  className="input mini"
+                                  type="number"
+                                  min="0"
+                                  placeholder="0"
+                                  value={selected[v.id]?.qty ?? ''}
+                                  onChange={(e) => setQty(v, p, e.target.value)}
+                                />
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                 )}
               </div>

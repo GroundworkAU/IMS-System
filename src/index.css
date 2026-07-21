@@ -722,3 +722,27 @@ a.btn { display: inline-block; text-decoration: none; }
 .stock-at strong { color: var(--dark-brown); }
 .stock-at.destination { color: var(--deep-brown); }
 .stock-at.destination strong { color: var(--deep-brown); }
+
+/* ---------- Variant tables ---------- */
+.variant-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.variant-table th {
+  text-align: left; font-size: 0.64rem; text-transform: uppercase;
+  letter-spacing: 0.07em; color: var(--muted); font-weight: 700;
+  padding: 0 10px 8px; border-bottom: 1px solid var(--blush); white-space: nowrap;
+}
+.variant-table td {
+  padding: 9px 10px; border-bottom: 1px solid rgba(242, 224, 213, 0.6);
+  vertical-align: middle;
+}
+.variant-table tr:last-child td { border-bottom: none; }
+.variant-table .num { text-align: right; }
+.variant-table td.num { font-weight: 600; color: var(--dark-brown); }
+.variant-table td.num.zero { color: #c3b6ac; font-weight: 500; }
+.variant-table th.destination, .variant-table td.destination { color: var(--deep-brown); }
+.variant-table td.num .input.mini { width: 66px; text-align: right; }
+.variant-table .cell-sub { font-size: 12px; }
+
+@media (max-width: 760px) {
+  .product-variants { overflow-x: auto; }
+  .variant-table { min-width: 520px; }
+}

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { syncProducts } from '../lib/integrations'
+import { sortVariants } from '../lib/sizes'
 
 const money = (n) =>
   new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(Number(n || 0))
@@ -280,15 +281,23 @@ export default function Products() {
 
                   {isOpen && (
                     <div className="product-variants">
-                      <table className="table">
+                      <table className="variant-table">
                         <thead>
                           <tr>
-                            <th>Size / option</th><th>SKU</th><th>Barcode</th>
-                            <th>Price</th><th>Stock on hand</th>
+                            <th>Size / option</th>
+                            <th>SKU</th>
+                            <th>Barcode</th>
+                            <th className="num">Price</th>
+                            {locations
+                              .filter((l) => shown.includes(l.id))
+                              .map((l) => (
+                                <th key={l.id} className="num">{l.name}</th>
+                              ))}
+                            <th className="num">Total</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {(p.variants ?? []).map((v) => {
+                          {sortVariants(p.variants).map((v) => {
                             const levels = v.inventory_levels ?? []
                             const rows = locations
                               .filter((l) => shown.includes(l.id))
@@ -296,6 +305,7 @@ export default function Products() {
                                 const found = levels.find((i) => i.location_id === l.id)
                                 return { id: l.id, name: l.name, qty: found ? found.on_hand : 0 }
                               })
+                            const total = rows.reduce((sum, r) => sum + r.qty, 0)
                             return (
                               <tr key={v.id}>
                                 <td className="cell-strong">{v.option_name || 'Single'}</td>
@@ -303,31 +313,13 @@ export default function Products() {
                                 <td>
                                   {v.barcode || <span className="cell-sub">Missing</span>}
                                 </td>
-                                <td>{money(v.retail_price)}</td>
-                                <td>
-                                  {rows.length === 0 ? (
-                                    <span className="cell-sub">No locations set up</span>
-                                  ) : (
-                                    <div className="stock-lines">
-                                      {rows.map((r) => (
-                                        <div key={r.id} className="stock-line">
-                                          <span className="cell-sub">{r.name}</span>
-                                          <span className={r.qty > 0 ? 'stock-num' : 'stock-num zero'}>
-                                            {r.qty}
-                                          </span>
-                                        </div>
-                                      ))}
-                                      {rows.length > 1 && (
-                                        <div className="stock-line stock-total">
-                                          <span className="cell-sub">Total</span>
-                                          <span className="stock-num">
-                                            {rows.reduce((s, r) => s + r.qty, 0)}
-                                          </span>
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
-                                </td>
+                                <td className="num">{money(v.retail_price)}</td>
+                                {rows.map((r) => (
+                                  <td key={r.id} className={'num' + (r.qty === 0 ? ' zero' : '')}>
+                                    {r.qty}
+                                  </td>
+                                ))}
+                                <td className="num cell-strong">{total}</td>
                               </tr>
                             )
                           })}
