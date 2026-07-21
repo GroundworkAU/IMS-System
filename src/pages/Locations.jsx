@@ -2,8 +2,10 @@ import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/Modal'
+import { platformInfo } from '../lib/platforms'
+import { Link } from 'react-router-dom'
 
-const EMPTY = { name: '', type: 'physical', external_ref: '', address: '', is_active: true }
+const EMPTY = { name: '', type: 'physical', external_refs: {}, address: '', is_active: true }
 
 const TYPES = [
   { value: 'physical', label: 'Physical store' },
@@ -13,7 +15,8 @@ const TYPES = [
 const typeLabel = (v) => TYPES.find((t) => t.value === v)?.label ?? v
 
 export default function Locations() {
-  const { profile } = useAuth()
+  const { profile, org } = useAuth()
+  const orgPlatforms = org?.platforms ?? []
   const [locations, setLocations] = useState([])
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState(null)
@@ -24,7 +27,7 @@ export default function Locations() {
     setLoading(true)
     const { data, error } = await supabase
       .from('locations')
-      .select('id, name, type, external_ref, address, is_active')
+      .select('id, name, type, external_refs, address, is_active')
       .order('name')
     if (error) setStatus({ type: 'err', text: error.message })
     setLocations(data ?? [])
@@ -39,11 +42,18 @@ export default function Locations() {
       return
     }
     setBusy(true)
+    // Online stores have no street address, and we only keep references for
+    // platforms this business actually uses.
+    const refs = {}
+    for (const key of orgPlatforms) {
+      const val = (values.external_refs?.[key] ?? '').trim()
+      if (val) refs[key] = val
+    }
     const payload = {
       name: values.name.trim(),
       type: values.type,
-      external_ref: values.external_ref.trim() || null,
-      address: values.address.trim() || null,
+      external_refs: refs,
+      address: values.type === 'online' ? null : (values.address.trim() || null),
       is_active: values.is_active,
     }
     const { error } = id
@@ -118,7 +128,7 @@ export default function Locations() {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Location</th><th>Type</th><th>Lightspeed reference</th>
+                  <th>Location</th><th>Type</th><th>Linked to</th>
                   <th>Status</th><th></th>
                 </tr>
               </thead>
@@ -131,15 +141,27 @@ export default function Locations() {
                     </td>
                     <td><span className="pill">{typeLabel(l.type)}</span></td>
                     <td>
-                      {l.external_ref
-                        ? <code className="code-ref">{l.external_ref}</code>
-                        : <span className="cell-sub">Not linked</span>}
+                      {Object.keys(l.external_refs ?? {}).length > 0 ? (
+                        Object.entries(l.external_refs).map(([key, val]) => (
+                          <div key={key} className="ref-line">
+                            <span className="ref-name">{platformInfo(key).label}</span>
+                            <code className="code-ref">{val}</code>
+                          </div>
+                        ))
+                      ) : (
+                        <span className="cell-sub">Not linked</span>
+                      )}
                     </td>
                     <td>{l.is_active ? 'Active' : 'Inactive'}</td>
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                       <button
                         className="btn"
-                        onClick={() => setModal({ values: { ...EMPTY, ...l }, id: l.id })}
+                        onClick={() =>
+                          setModal({
+                            values: { ...EMPTY, ...l, external_refs: l.external_refs ?? {} },
+                            id: l.id,
+                          })
+                        }
                       >
                         Edit
                       </button>{' '}
@@ -157,6 +179,7 @@ export default function Locations() {
         <LocationModal
           initial={modal.values}
           id={modal.id}
+          orgPlatforms={orgPlatforms}
           busy={busy}
           onClose={() => setModal(null)}
           onSave={save}
@@ -166,9 +189,11 @@ export default function Locations() {
   )
 }
 
-function LocationModal({ initial, id, busy, onClose, onSave }) {
+function LocationModal({ initial, id, orgPlatforms, busy, onClose, onSave }) {
   const [v, setV] = useState(initial)
   const set = (k) => (e) => setV({ ...v, [k]: e.target.value })
+  const setRef = (key) => (e) =>
+    setV({ ...v, external_refs: { ...(v.external_refs ?? {}), [key]: e.target.value } })
 
   return (
     <Modal
@@ -197,25 +222,39 @@ function LocationModal({ initial, id, busy, onClose, onSave }) {
         </select>
       </div>
 
-      <div className="field">
-        <label htmlFor="l-address">Address</label>
-        <input id="l-address" className="input" value={v.address} onChange={set('address')} />
-      </div>
+      {v.type === 'physical' && (
+        <div className="field">
+          <label htmlFor="l-address">Address</label>
+          <input id="l-address" className="input" value={v.address ?? ''} onChange={set('address')} />
+        </div>
+      )}
 
-      <div className="field">
-        <label htmlFor="l-ref">Lightspeed outlet reference</label>
-        <input
-          id="l-ref"
-          className="input"
-          placeholder="Optional for now"
-          value={v.external_ref}
-          onChange={set('external_ref')}
-        />
-        <p className="field-hint">
-          The outlet id this location matches in Lightspeed. Used to line stock up between the
-          two systems ~ you can leave it blank and add it when we connect the integration.
+      {orgPlatforms.length > 0 ? (
+        <>
+          <h4 className="sub-label">Linked systems (optional)</h4>
+          {orgPlatforms.map((key) => {
+            const info = platformInfo(key)
+            return (
+              <div className="field" key={key}>
+                <label htmlFor={`l-ref-${key}`}>{info.refLabel}</label>
+                <input
+                  id={`l-ref-${key}`}
+                  className="input"
+                  placeholder="Optional for now"
+                  value={v.external_refs?.[key] ?? ''}
+                  onChange={setRef(key)}
+                />
+                <p className="field-hint">{info.refHint}</p>
+              </div>
+            )
+          })}
+        </>
+      ) : (
+        <p className="field-hint" style={{ marginBottom: 16 }}>
+          Tell us which systems you use in <Link className="linklike" to="/settings">Settings</Link>{' '}
+          and you'll be able to link this location to them.
         </p>
-      </div>
+      )}
 
       <div className="field" style={{ marginBottom: 0 }}>
         <label className="check-row">

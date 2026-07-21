@@ -333,3 +333,25 @@ textarea.input { resize: vertical; font-family: inherit; }
   font-size: 12px; background: var(--cream); border: 1px solid var(--blush);
   padding: 2px 7px; border-radius: 5px; color: var(--deep-brown);
 }
+
+/* ---------- Choice grid (platform pickers) ---------- */
+.choice-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.choice {
+  display: flex; align-items: flex-start; gap: 10px;
+  border: 1px solid var(--blush); border-radius: 10px;
+  padding: 12px 14px; cursor: pointer; background: var(--surface);
+}
+.choice:hover { background: var(--cream); }
+.choice.selected { border-color: var(--deep-brown); background: var(--cream); }
+.choice input { margin-top: 3px; }
+.choice-label { display: block; font-weight: 600; font-size: 13.5px; color: var(--dark-brown); }
+.choice-kind { display: block; font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+
+.auth-card-wide { width: 480px; }
+.ref-line { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.ref-line:last-child { margin-bottom: 0; }
+.ref-name { font-size: 11.5px; color: var(--muted); }
+
+@media (max-width: 560px) {
+  .choice-grid { grid-template-columns: 1fr; }
+}

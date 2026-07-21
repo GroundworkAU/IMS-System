@@ -1,12 +1,20 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import { PLATFORMS } from '../lib/platforms'
 
 export default function Onboarding() {
-  const { user, refresh, signOut } = useAuth()
+  const { user, profile, refresh, signOut } = useAuth()
   const [name, setName] = useState('')
+  const [platforms, setPlatforms] = useState([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
+
+  const firstName = profile?.full_name?.trim().split(/\s+/)[0]
+
+  function toggle(value) {
+    setPlatforms((p) => (p.includes(value) ? p.filter((v) => v !== value) : [...p, value]))
+  }
 
   async function handleCreate() {
     if (!name.trim()) {
@@ -15,7 +23,10 @@ export default function Onboarding() {
     }
     setBusy(true)
     setError(null)
-    const { error } = await supabase.rpc('create_organisation', { org_name: name.trim() })
+    const { error } = await supabase.rpc('create_organisation', {
+      org_name: name.trim(),
+      org_platforms: platforms,
+    })
     setBusy(false)
     if (error) setError(error.message)
     else await refresh()
@@ -23,19 +34,21 @@ export default function Onboarding() {
 
   return (
     <div className="auth-wrap">
-      <div className="auth-card">
+      <div className="auth-card auth-card-wide">
         <div className="auth-brand">
           <div className="brand-mark">IMS</div>
           <div>
-            <div className="brand-name" style={{ color: '#17201f' }}>IMS System</div>
-            <div className="brand-sub" style={{ color: '#6a7570' }}>Inventory management</div>
+            <div className="brand-name" style={{ color: 'var(--dark-brown)' }}>IMS System</div>
+            <div className="brand-sub" style={{ color: 'var(--muted)' }}>Inventory management</div>
           </div>
         </div>
 
-        <h1 className="auth-title">Set up your business</h1>
+        <h1 className="auth-title">
+          {firstName ? `Welcome, ${firstName}` : 'Set up your business'}
+        </h1>
         <p className="auth-sub">
-          You're signed in as {user?.email}. Create your business to get started - you'll be
-          the owner and can invite your team afterwards.
+          You're signed in as {user?.email}. Set your business up and you'll be its owner, ready
+          to invite your team.
         </p>
 
         <div className="field">
@@ -46,8 +59,33 @@ export default function Onboarding() {
             placeholder="e.g. Port Adelaide Football Club"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
           />
+        </div>
+
+        <div className="field">
+          <label>Which systems do you use?</label>
+          <p className="field-hint" style={{ marginTop: 0, marginBottom: 10 }}>
+            Pick any that apply. This decides which details we ask you for later ~ you can change
+            it any time in Settings.
+          </p>
+          <div className="choice-grid">
+            {PLATFORMS.map((p) => (
+              <label
+                key={p.value}
+                className={'choice' + (platforms.includes(p.value) ? ' selected' : '')}
+              >
+                <input
+                  type="checkbox"
+                  checked={platforms.includes(p.value)}
+                  onChange={() => toggle(p.value)}
+                />
+                <span>
+                  <span className="choice-label">{p.label}</span>
+                  <span className="choice-kind">{p.kind}</span>
+                </span>
+              </label>
+            ))}
+          </div>
         </div>
 
         <button
@@ -56,20 +94,17 @@ export default function Onboarding() {
           onClick={handleCreate}
           disabled={busy}
         >
-          {busy ? 'Creating...' : 'Create business'}
+          {busy ? 'Setting up...' : 'Create business'}
         </button>
 
         {error && <div className="auth-msg err">{error}</div>}
 
-        <p className="auth-sub" style={{ marginTop: 18, marginBottom: 0, fontSize: 12 }}>
-          Been invited to an existing business? Use the link from your invitation email instead.{' '}
-          <button
-            className="linklike"
-            onClick={signOut}
-          >
-            Sign out
-          </button>
-        </p>
+        <div className="auth-foot">
+          <span>
+            Been invited to an existing business? Use the link from your invitation instead.{' '}
+            <button className="linklike" onClick={signOut}>Sign out</button>
+          </span>
+        </div>
       </div>
     </div>
   )
