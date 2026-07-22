@@ -1006,3 +1006,8 @@ a.btn { display: inline-block; text-decoration: none; }
   display: flex; flex-direction: column; gap: 8px;
 }
 .sheet-report-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; }
+
+.step { font-family: inherit; }
+.step.clickable { cursor: pointer; }
+.step.clickable:hover { border-color: var(--deep-brown); color: var(--deep-brown); }
+.step:disabled { cursor: not-allowed; opacity: 0.6; }

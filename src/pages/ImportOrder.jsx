@@ -469,12 +469,33 @@ export default function ImportOrder() {
       {error && <div className="auth-msg err" style={{ marginBottom: 16 }}>{error}</div>}
 
       <div className="steps">
-        {['Order details', 'Find the table', 'Map the columns', 'Check and import'].map((label, i) => (
-          <div key={label} className={'step' + (step === i + 1 ? ' active' : step > i + 1 ? ' done' : '')}>
-            <span className="step-num">{i + 1}</span>
-            {label}
-          </div>
-        ))}
+        {['Order details', 'Find the table', 'Map the columns', 'Check and import'].map((label, i) => {
+          const n = i + 1
+          // A step is reachable once there is enough to show on it.
+          const reachable =
+            n === 1 ||
+            (n === 2 && sheets.length > 0) ||
+            (n === 3 && headerRow != null) ||
+            (n === 4 && mapping.supplier_sku != null && Object.keys(sizeCols).length > 0)
+
+          return (
+            <button
+              key={label}
+              type="button"
+              className={
+                'step' +
+                (step === n ? ' active' : step > n ? ' done' : '') +
+                (reachable ? ' clickable' : '')
+              }
+              disabled={!reachable}
+              onClick={() => reachable && setStep(n)}
+              title={reachable ? `Go to ${label.toLowerCase()}` : 'Not ready yet'}
+            >
+              <span className="step-num">{n}</span>
+              {label}
+            </button>
+          )
+        })}
       </div>
 
       {/* ---- 1. order details ---- */}
