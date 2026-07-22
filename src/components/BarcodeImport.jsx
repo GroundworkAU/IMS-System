@@ -15,8 +15,10 @@ const TARGETS = [
 ]
 
 export default function BarcodeImport({ poId, lines, skuFor, onClose, onDone }) {
-  const [rows, setRows] = useState([])
+  const [sheets, setSheets] = useState([])
+  const [sheetIndex, setSheetIndex] = useState(0)
   const [headerRow, setHeaderRow] = useState(0)
+  const [showSheet, setShowSheet] = useState(true)
   const [target, setTarget] = useState('supplier_sku')
   const [keyCol, setKeyCol] = useState(null)
   const [useSize, setUseSize] = useState(true)
@@ -28,14 +30,18 @@ export default function BarcodeImport({ poId, lines, skuFor, onClose, onDone }) 
   async function handleFile(file) {
     setError(null)
     try {
-      const sheets = await readWorkbook(file)
-      setRows(sheets[0]?.rows ?? [])
+      const parsed = await readWorkbook(file)
+      setSheets(parsed)
+      setSheetIndex(0)
+      setHeaderRow(0)
+      setShowSheet(true)
       setKeyCol(null); setSizeCol(null); setBarcodeCol(null)
     } catch (err) {
       setError(`Could not read that file: ${err.message}`)
     }
   }
 
+  const rows = sheets[sheetIndex]?.rows ?? []
   const headers = rows[headerRow] ?? []
   const targetDef = TARGETS.find((t) => t.key === target) ?? TARGETS[0]
 
@@ -100,6 +106,10 @@ export default function BarcodeImport({ poId, lines, skuFor, onClose, onDone }) 
     (l) => !l.barcode && !matched.some((m) => m.line.id === l.id)
   ).length
 
+  const columnOptions = headers
+    .map((h, i) => ({ i, text: cleanHeader(h) }))
+    .filter((o) => o.text)
+
   async function save() {
     setBusy(true)
     setError(null)
@@ -113,10 +123,6 @@ export default function BarcodeImport({ poId, lines, skuFor, onClose, onDone }) 
     setBusy(false)
     onDone(matched.length)
   }
-
-  const columnOptions = headers
-    .map((h, i) => ({ i, text: cleanHeader(h) }))
-    .filter((o) => o.text)
 
   return (
     <Modal
@@ -151,20 +157,77 @@ export default function BarcodeImport({ poId, lines, skuFor, onClose, onDone }) 
         />
       </div>
 
-      {rows.length > 0 && (
+      {sheets.length > 0 && (
         <>
-          <div className="form-row">
-            <div className="field" style={{ flex: '0 1 120px' }}>
-              <label htmlFor="bc-header">Header row</label>
-              <input
-                id="bc-header"
+          {sheets.length > 1 && (
+            <div className="field">
+              <label htmlFor="bc-sheet">Which sheet?</label>
+              <select
+                id="bc-sheet"
                 className="input"
-                type="number"
-                min="1"
-                value={headerRow + 1}
-                onChange={(e) => setHeaderRow(Math.max(0, Number(e.target.value) - 1))}
-              />
+                style={{ maxWidth: 260 }}
+                value={sheetIndex}
+                onChange={(e) => {
+                  setSheetIndex(Number(e.target.value))
+                  setHeaderRow(0)
+                  setKeyCol(null); setSizeCol(null); setBarcodeCol(null)
+                }}
+              >
+                {sheets.map((sh, i) => (
+                  <option key={sh.name} value={i}>{sh.name}</option>
+                ))}
+              </select>
             </div>
+          )}
+
+          <div className="field">
+            <div className="card-head" style={{ marginBottom: 8 }}>
+              <label style={{ margin: 0 }}>
+                Click the row with the column headings
+              </label>
+              <button className="linklike" onClick={() => setShowSheet(!showSheet)}>
+                {showSheet ? 'Hide the file' : 'Show the file'}
+              </button>
+            </div>
+
+            {showSheet && (
+              <div className="sheet-preview" style={{ maxHeight: 220 }}>
+                <table className="sheet-table">
+                  <tbody>
+                    {rows.slice(0, 20).map((row, i) => (
+                      <tr
+                        key={i}
+                        className={headerRow === i ? 'chosen' : ''}
+                        onClick={() => {
+                          setHeaderRow(i)
+                          setKeyCol(null); setSizeCol(null); setBarcodeCol(null)
+                        }}
+                      >
+                        <td className="row-num">{i + 1}</td>
+                        {Array.from({
+                          length: Math.min(
+                            12,
+                            Math.max(...rows.slice(0, 20).map((r) => r?.length ?? 0), 1)
+                          ),
+                        }).map((_, c) => (
+                          <td key={c}>{row?.[c] == null ? '' : String(row[c]).slice(0, 18)}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {columnOptions.length === 0 && (
+            <div className="placeholder-note">
+              No column headings found on row {headerRow + 1}. Click the right row above, or try
+              another sheet.
+            </div>
+          )}
+
+          <div className="form-row">
 
             <div className="field" style={{ flex: '1 1 180px' }}>
               <label htmlFor="bc-key">Their column to match on</label>
