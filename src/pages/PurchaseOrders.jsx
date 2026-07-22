@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { useAuth } from '../context/AuthContext'
 
 const formatDate = (d) =>
   d ? new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'
@@ -10,14 +11,16 @@ const money = (n) =>
 
 export default function PurchaseOrders() {
   const navigate = useNavigate()
+  const { isAdmin } = useAuth()
   const [orders, setOrders] = useState([])
+  const [status, setStatus] = useState(null)
   const [loading, setLoading] = useState(true)
 
   const load = useCallback(async () => {
     setLoading(true)
     const { data } = await supabase
       .from('purchase_orders')
-      .select('id,reference,order_year,order_type,status,created_at,pushed_at,source_file_name,brands(name),suppliers(name),purchase_order_lines(qty_ordered,unit_cost)')
+      .select('id,reference,order_year,order_type,status,created_at,pushed_at,source_file_name,created_by,brands(name),suppliers(name),purchase_order_lines(qty_ordered,unit_cost),po_products(pushed_at)')
       .order('created_at', { ascending: false })
       .limit(100)
     setOrders(data ?? [])
@@ -25,6 +28,28 @@ export default function PurchaseOrders() {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  async function remove(o) {
+    const pushed = o.pushed_at || (o.po_products ?? []).some((p) => p.pushed_at)
+    const warning = pushed
+      ? `Delete ${o.reference}? Products already created in Lightspeed stay there ~ this only removes the order from IMS.`
+      : `Delete ${o.reference}? Its lines go with it and this cannot be undone.`
+
+    if (!window.confirm(warning)) return
+
+    const { error } = await supabase.from('purchase_orders').delete().eq('id', o.id)
+    if (error) {
+      setStatus({
+        type: 'err',
+        text: error.message.includes('policy')
+          ? 'You can only delete orders you imported. Ask an owner or admin.'
+          : error.message,
+      })
+    } else {
+      setStatus({ type: 'ok', text: `${o.reference} deleted.` })
+      load()
+    }
+  }
 
   return (
     <div>
@@ -36,6 +61,12 @@ export default function PurchaseOrders() {
           size grid into product lines ready to create in your point of sale.
         </p>
       </div>
+
+      {status && (
+        <div className={'auth-msg ' + (status.type === 'ok' ? 'ok' : 'err')} style={{ marginBottom: 16 }}>
+          {status.text}
+        </div>
+      )}
 
       <div className="card">
         <div className="card-head">
@@ -94,12 +125,15 @@ export default function PurchaseOrders() {
                           ? <span className="status-pill ok">{formatDate(o.pushed_at)}</span>
                           : <span className="status-pill neutral">Not yet</span>}
                       </td>
-                      <td style={{ textAlign: 'right' }}>
+                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                         <button
                           className="btn"
                           onClick={() => navigate(`/purchase-orders/${o.id}`)}
                         >
                           View
+                        </button>{' '}
+                        <button className="btn btn-quiet" onClick={() => remove(o)}>
+                          Delete
                         </button>
                       </td>
                     </tr>

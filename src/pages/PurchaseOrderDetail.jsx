@@ -163,6 +163,27 @@ export default function PurchaseOrderDetail() {
     }
   }
 
+  async function removeOrder() {
+    const pushed = products.some((p) => p.pushed_at)
+    const warning = pushed
+      ? `Delete ${order.reference}? ${products.filter((p) => p.pushed_at).length} product(s) already created in Lightspeed stay there ~ this only removes the order from IMS.`
+      : `Delete ${order.reference}? Its lines and products go with it and this cannot be undone.`
+
+    if (!window.confirm(warning)) return
+
+    const { error } = await supabase.from('purchase_orders').delete().eq('id', order.id)
+    if (error) {
+      setStatus({
+        type: 'err',
+        text: error.message.includes('policy')
+          ? 'You can only delete orders you imported. Ask an owner or admin.'
+          : error.message,
+      })
+    } else {
+      navigate('/purchase-orders')
+    }
+  }
+
   function toggle(code) {
     setExpanded((e) => {
       const next = new Set(e)
@@ -221,6 +242,9 @@ export default function PurchaseOrderDetail() {
         <div className="card-head">
           <h3 className="section-title" style={{ margin: 0 }}>Names and SKUs</h3>
           <div className="search-wrap">
+            <button className="btn btn-quiet" onClick={removeOrder}>
+              Delete order
+            </button>
             <button className="btn" onClick={() => setBarcodesOpen(true)}>
               Import barcodes
             </button>
