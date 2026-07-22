@@ -1,14 +1,21 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import Modal from './Modal'
-import { readWorkbook, colLetter, cleanHeader } from '../lib/sheet'
+import { readWorkbook, colLetter, cleanHeader, normaliseBarcode } from '../lib/sheet'
 
 // Barcodes usually arrive weeks after the order. This matches a file of
 // SKU/barcode pairs back onto the order lines.
+// Sizes are written every which way between systems: "SM", "S/M", "s m".
+// Compare them stripped back to letters and numbers.
+const norm = (v) => String(v ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+
 export default function BarcodeImport({ poId, lines, skuFor, onClose, onDone }) {
   const [rows, setRows] = useState([])
   const [headerRow, setHeaderRow] = useState(0)
+  const [mode, setMode] = useState('sku')      // 'sku' or 'code_size'
   const [skuCol, setSkuCol] = useState(null)
+  const [codeCol, setCodeCol] = useState(null)
+  const [sizeCol, setSizeCol] = useState(null)
   const [barcodeCol, setBarcodeCol] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -28,23 +35,44 @@ export default function BarcodeImport({ poId, lines, skuFor, onClose, onDone }) 
   const headers = rows[headerRow] ?? []
 
   // Build the pairs, then see which of our lines they hit.
+  const ready = barcodeCol != null &&
+    (mode === 'sku' ? skuCol != null : codeCol != null && sizeCol != null)
+
   const pairs = []
-  if (skuCol != null && barcodeCol != null) {
+  if (ready) {
     for (let r = headerRow + 1; r < rows.length; r += 1) {
-      const sku = rows[r]?.[skuCol]
-      const barcode = rows[r]?.[barcodeCol]
-      if (sku == null || barcode == null) continue
-      const cleanSku = String(sku).trim().toUpperCase()
-      const cleanBarcode = String(barcode).trim()
-      if (!cleanSku || !cleanBarcode) continue
-      pairs.push({ sku: cleanSku, barcode: cleanBarcode })
+      const barcode = normaliseBarcode(rows[r]?.[barcodeCol])
+      if (!barcode) continue
+
+      if (mode === 'sku') {
+        const sku = rows[r]?.[skuCol]
+        if (sku == null || String(sku).trim() === '') continue
+        pairs.push({ label: String(sku).trim(), sku: String(sku).trim().toUpperCase(), barcode })
+      } else {
+        const code = rows[r]?.[codeCol]
+        const size = rows[r]?.[sizeCol]
+        if (code == null || String(code).trim() === '') continue
+        pairs.push({
+          label: `${String(code).trim()} ${String(size ?? '').trim()}`.trim(),
+          code: String(code).trim().toUpperCase(),
+          size: norm(size),
+          barcode,
+        })
+      }
     }
   }
 
   const byLine = []
   const unmatched = []
   for (const pair of pairs) {
-    const line = lines.find((l) => skuFor(l).toUpperCase() === pair.sku)
+    const line = mode === 'sku'
+      ? lines.find((l) => skuFor(l).toUpperCase() === pair.sku)
+      : lines.find(
+          (l) =>
+            String(l.supplier_sku ?? '').trim().toUpperCase() === pair.code &&
+            norm(l.option_name) === pair.size
+        )
+
     if (line) byLine.push({ line, barcode: pair.barcode })
     else unmatched.push(pair)
   }
@@ -102,8 +130,30 @@ export default function BarcodeImport({ poId, lines, skuFor, onClose, onDone }) 
 
       {rows.length > 0 && (
         <>
+          <div className="field">
+            <label>How does their file identify each item?</label>
+            <div className="loc-chips" style={{ marginTop: 4 }}>
+              <button
+                className={'loc-chip' + (mode === 'sku' ? ' on' : '')}
+                onClick={() => setMode('sku')}
+              >
+                By our SKU
+              </button>
+              <button
+                className={'loc-chip' + (mode === 'code_size' ? ' on' : '')}
+                onClick={() => setMode('code_size')}
+              >
+                By their code and size
+              </button>
+            </div>
+            <p className="field-hint">
+              Suppliers usually send their own product code with a size beside it rather than the
+              SKU you created. Both together identify the item.
+            </p>
+          </div>
+
           <div className="form-row">
-            <div className="field" style={{ flex: '0 1 130px' }}>
+            <div className="field" style={{ flex: '0 1 120px' }}>
               <label htmlFor="bc-header">Header row</label>
               <input
                 id="bc-header"
@@ -114,23 +164,62 @@ export default function BarcodeImport({ poId, lines, skuFor, onClose, onDone }) 
                 onChange={(e) => setHeaderRow(Math.max(0, Number(e.target.value) - 1))}
               />
             </div>
-            <div className="field" style={{ flex: '1 1 160px' }}>
-              <label htmlFor="bc-sku">SKU column</label>
-              <select
-                id="bc-sku"
-                className="input"
-                value={skuCol ?? ''}
-                onChange={(e) => setSkuCol(e.target.value === '' ? null : Number(e.target.value))}
-              >
-                <option value="">Choose...</option>
-                {headers.map((h, i) =>
-                  cleanHeader(h) ? (
-                    <option key={i} value={i}>{colLetter(i)} · {cleanHeader(h).slice(0, 30)}</option>
-                  ) : null
-                )}
-              </select>
-            </div>
-            <div className="field" style={{ flex: '1 1 160px' }}>
+
+            {mode === 'sku' ? (
+              <div className="field" style={{ flex: '1 1 160px' }}>
+                <label htmlFor="bc-sku">SKU column</label>
+                <select
+                  id="bc-sku"
+                  className="input"
+                  value={skuCol ?? ''}
+                  onChange={(e) => setSkuCol(e.target.value === '' ? null : Number(e.target.value))}
+                >
+                  <option value="">Choose...</option>
+                  {headers.map((h, i) =>
+                    cleanHeader(h) ? (
+                      <option key={i} value={i}>{colLetter(i)} · {cleanHeader(h).slice(0, 30)}</option>
+                    ) : null
+                  )}
+                </select>
+              </div>
+            ) : (
+              <>
+                <div className="field" style={{ flex: '1 1 150px' }}>
+                  <label htmlFor="bc-supcode">Their product code</label>
+                  <select
+                    id="bc-supcode"
+                    className="input"
+                    value={codeCol ?? ''}
+                    onChange={(e) => setCodeCol(e.target.value === '' ? null : Number(e.target.value))}
+                  >
+                    <option value="">Choose...</option>
+                    {headers.map((h, i) =>
+                      cleanHeader(h) ? (
+                        <option key={i} value={i}>{colLetter(i)} · {cleanHeader(h).slice(0, 26)}</option>
+                      ) : null
+                    )}
+                  </select>
+                </div>
+                <div className="field" style={{ flex: '1 1 130px' }}>
+                  <label htmlFor="bc-size">Size column</label>
+                  <select
+                    id="bc-size"
+                    className="input"
+                    value={sizeCol ?? ''}
+                    onChange={(e) => setSizeCol(e.target.value === '' ? null : Number(e.target.value))}
+                  >
+                    <option value="">Choose...</option>
+                    {headers.map((h, i) =>
+                      cleanHeader(h) ? (
+                        <option key={i} value={i}>{colLetter(i)} · {cleanHeader(h).slice(0, 26)}</option>
+                      ) : null
+                    )}
+                  </select>
+                </div>
+              </>
+            )}
+
+            <div className="field" style={{ flex: '1 1 150px' }}>
               <label htmlFor="bc-code">Barcode column</label>
               <select
                 id="bc-code"
@@ -148,7 +237,7 @@ export default function BarcodeImport({ poId, lines, skuFor, onClose, onDone }) 
             </div>
           </div>
 
-          {skuCol != null && barcodeCol != null && (
+          {ready && (
             <div className="fact-row" style={{ marginTop: 4 }}>
               <span>
                 <span className="fact-label">Matched</span>
@@ -167,9 +256,11 @@ export default function BarcodeImport({ poId, lines, skuFor, onClose, onDone }) 
 
           {unmatched.length > 0 && (
             <div className="placeholder-note">
-              {unmatched.length} row(s) did not match a SKU on this order, for example{' '}
-              {unmatched.slice(0, 3).map((u) => u.sku).join(', ')}. Check the SKUs match what you
-              set on this order.
+              {unmatched.length} row(s) did not match anything on this order, for example{' '}
+              {unmatched.slice(0, 4).map((u) => u.label).join(', ')}.{' '}
+              {mode === 'sku'
+                ? 'Try matching by their code and size instead.'
+                : 'Check their code matches the supplier code on this order, and that the sizes line up.'}
             </div>
           )}
         </>
