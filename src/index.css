@@ -977,7 +977,7 @@ a.btn { display: inline-block; text-decoration: none; }
 /* ---------- Purchase order product rows ---------- */
 .po-product {
   display: grid;
-  grid-template-columns: 28px minmax(150px, 1fr) minmax(180px, 1.4fr) minmax(130px, 0.9fr) auto auto;
+  grid-template-columns: 56px minmax(140px, 1fr) minmax(180px, 1.4fr) minmax(130px, 0.9fr) auto auto;
   gap: 12px; align-items: end; padding: 12px 14px;
 }
 .po-toggle { background: none; border: none; padding: 0; align-self: center; }
@@ -994,3 +994,6 @@ a.btn { display: inline-block; text-decoration: none; }
   .po-product { grid-template-columns: 28px 1fr; }
   .po-product .field, .po-variants, .po-product .stock-chip { grid-column: 2; }
 }
+
+.po-select { display: flex; align-items: center; gap: 6px; align-self: center; }
+.po-state { display: flex; align-items: center; gap: 8px; align-self: center; }

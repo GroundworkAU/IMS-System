@@ -111,3 +111,10 @@ export async function syncProducts(provider = 'bigcommerce') {
 export async function syncSuppliers(provider = 'lightspeed') {
   return callIntegrations({ action: 'sync_suppliers', provider })
 }
+
+// Create products from an imported order in the point of sale.
+export async function pushProducts(poId, productIds) {
+  return callIntegrations({
+    action: 'push_products', provider: 'lightspeed', po_id: poId, product_ids: productIds,
+  })
+}

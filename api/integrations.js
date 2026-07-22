@@ -1111,6 +1111,192 @@ async function loadVariantMap(sb, orgId, source, problems) {
   return map
 }
 
+// ---------------------------------------------------------------------------
+// Push products from an imported order into Lightspeed X-Series.
+//
+// A product with sizes becomes a variant family in one call: name plus a
+// variants array, each entry carrying its own sku and variant_definitions.
+// A product without sizes is a plain product. Whatever comes back is recorded
+// against our rows, so a push can be repeated without creating duplicates.
+// ---------------------------------------------------------------------------
+async function lsPost(variant, creds, path, body) {
+  const res = await fetch(`${lsBase(variant, creds)}${path}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${creds.access_token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(body),
+  })
+  const text = await res.text()
+  let parsed = null
+  try { parsed = text ? JSON.parse(text) : null } catch { /* not json */ }
+  if (!res.ok) {
+    const detail = parsed?.error || parsed?.message || text?.slice(0, 300) || ''
+    throw new Error(`Lightspeed replied ${res.status}: ${detail}`)
+  }
+  return parsed
+}
+
+async function lsPut(variant, creds, path, body) {
+  const res = await fetch(`${lsBase(variant, creds)}${path}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${creds.access_token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(body),
+  })
+  const text = await res.text()
+  if (!res.ok) throw new Error(`Lightspeed replied ${res.status}: ${text.slice(0, 300)}`)
+  return text ? JSON.parse(text) : null
+}
+
+async function pushProductsToLightspeed(sb, orgId, variant, creds, poId, productIds) {
+  if (variant !== 'xseries') {
+    return { error: 'Pushing products currently supports Lightspeed X-Series.' }
+  }
+
+  let q = sb.from('po_products').select('*').eq('org_id', orgId).eq('po_id', poId)
+  if (Array.isArray(productIds) && productIds.length) q = q.in('id', productIds)
+
+  const { data: products, error: pErr } = await q
+  if (pErr) return { error: pErr.message }
+  if (!products || products.length === 0) return { error: 'Nothing selected to push.' }
+
+  const { data: allLines, error: lErr } = await sb
+    .from('purchase_order_lines')
+    .select('id, supplier_sku, option_name, qty_ordered, unit_cost, retail_price, barcode, external_product_id')
+    .eq('org_id', orgId)
+    .eq('po_id', poId)
+  if (lErr) return { error: lErr.message }
+
+  const linesByCode = {}
+  for (const l of allLines ?? []) {
+    if (!linesByCode[l.supplier_sku]) linesByCode[l.supplier_sku] = []
+    linesByCode[l.supplier_sku].push(l)
+  }
+
+  const results = []
+  let created = 0
+  let updated = 0
+  let failed = 0
+
+  for (const p of products) {
+    const lines = linesByCode[p.supplier_sku] ?? []
+    const prefix = (p.sku_prefix ?? '').trim()
+    const name = (p.our_name ?? '').trim()
+
+    if (!prefix || !name) {
+      results.push({ id: p.id, sku: prefix, ok: false, error: 'Missing name or SKU prefix' })
+      failed += 1
+      continue
+    }
+
+    const skuFor = (size) => {
+      if (!p.has_variants) return prefix
+      const clean = String(size ?? '').trim().replace(/\s+/g, '')
+      return clean ? `${prefix}-${clean}` : prefix
+    }
+
+    try {
+      // Already created: send through any details that have changed since,
+      // which in practice means barcodes arriving later.
+      if (p.external_parent_id) {
+        let touched = 0
+        for (const l of lines) {
+          if (!l.external_product_id || !l.barcode) continue
+          await lsPut(variant, creds, `/api/2.1/products/${l.external_product_id}`, {
+            details: { sku: skuFor(l.option_name), barcode: String(l.barcode) },
+          })
+          touched += 1
+        }
+        results.push({ id: p.id, sku: prefix, ok: true, updated: touched })
+        updated += 1
+        continue
+      }
+
+      const cost = Number(lines[0]?.unit_cost ?? 0)
+      const retail = Number(lines[0]?.retail_price ?? 0)
+
+      let body
+      if (p.has_variants) {
+        body = {
+          name,
+          supply_price: cost,
+          retail_price: retail,
+          variants: lines.map((l) => ({
+            sku: skuFor(l.option_name),
+            supply_price: Number(l.unit_cost ?? cost),
+            retail_price: Number(l.retail_price ?? retail),
+            ...(l.barcode ? { barcode: String(l.barcode) } : {}),
+            variant_definitions: [{ name: 'Size', value: String(l.option_name ?? '').trim() }],
+          })),
+        }
+      } else {
+        body = {
+          name,
+          sku: prefix,
+          supply_price: cost,
+          retail_price: retail,
+          ...(lines[0]?.barcode ? { barcode: String(lines[0].barcode) } : {}),
+        }
+      }
+
+      const response = await lsPost(variant, creds, '/api/2.0/products', body)
+
+      // The response shape differs between a single product and a family, so
+      // take whatever ids we can find.
+      const payload = response?.data ?? response
+      const returned = Array.isArray(payload) ? payload : [payload]
+      const parentId = returned[0]?.variant_parent_id || returned[0]?.id || null
+
+      await sb
+        .from('po_products')
+        .update({
+          external_parent_id: parentId ? String(parentId) : null,
+          pushed_at: new Date().toISOString(),
+          push_error: null,
+        })
+        .eq('id', p.id)
+
+      // Match each returned product back to our line by SKU.
+      for (const l of lines) {
+        const wanted = skuFor(l.option_name)
+        const match = returned.find(
+          (r) => String(r?.sku ?? '').toUpperCase() === wanted.toUpperCase()
+        ) ?? (returned.length === 1 ? returned[0] : null)
+
+        if (match?.id) {
+          await sb
+            .from('purchase_order_lines')
+            .update({
+              external_product_id: String(match.id),
+              external_parent_id: parentId ? String(parentId) : null,
+              pushed_at: new Date().toISOString(),
+              push_error: null,
+            })
+            .eq('id', l.id)
+        }
+      }
+
+      results.push({ id: p.id, sku: prefix, ok: true, created: lines.length })
+      created += 1
+    } catch (err) {
+      await sb
+        .from('po_products')
+        .update({ push_error: err.message })
+        .eq('id', p.id)
+      results.push({ id: p.id, sku: prefix, ok: false, error: err.message })
+      failed += 1
+    }
+  }
+
+  return { created, updated, failed, results }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
@@ -1249,7 +1435,7 @@ export default async function handler(req, res) {
     if (
       action === 'sync_orders' || action === 'order_lines' ||
       action === 'check_refunds' || action === 'sync_products' ||
-      action === 'sync_suppliers'
+      action === 'sync_suppliers' || action === 'push_products'
     ) {
       const { data: secret } = await sb
         .from('integration_secrets')
@@ -1260,12 +1446,26 @@ export default async function handler(req, res) {
       if (!secret) return res.status(400).json({ error: 'Not connected yet.' })
       if (
         provider !== 'bigcommerce' &&
-        action !== 'sync_products' && action !== 'sync_suppliers'
+        action !== 'sync_products' && action !== 'sync_suppliers' &&
+        action !== 'push_products'
       ) {
         return res.status(400).json({ error: 'Order sync currently supports BigCommerce.' })
       }
 
       try {
+        if (action === 'push_products') {
+          const { data: setting } = await sb
+            .from('integration_settings')
+            .select('variant')
+            .match({ org_id: orgId, provider })
+            .maybeSingle()
+
+          const out = await pushProductsToLightspeed(
+            sb, orgId, setting?.variant ?? 'xseries', secret.credentials,
+            req.body.po_id, req.body.product_ids
+          )
+          return res.status(200).json({ ok: !out.error, ...out })
+        }
         if (action === 'sync_suppliers') {
           if (provider !== 'lightspeed') {
             return res.status(400).json({ error: 'Supplier import supports Lightspeed.' })
