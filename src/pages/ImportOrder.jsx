@@ -38,7 +38,8 @@ export default function ImportOrder() {
   const [sheets, setSheets] = useState([])
   const [sheetIndex, setSheetIndex] = useState(0)      // the sheet used for mapping
   const [chosenSheets, setChosenSheets] = useState([0]) // every sheet to read
-  const [headerRow, setHeaderRow] = useState(null)   // zero based
+  const [headerRow, setHeaderRow] = useState(null)   // zero based, current sheet
+  const [headerRows, setHeaderRows] = useState({})   // sheetIndex -> row, when set by hand
   const [mapping, setMapping] = useState({})         // field -> column index
   const [sizeCols, setSizeCols] = useState({})       // column index -> size label
   const [templateId, setTemplateId] = useState(null)
@@ -121,6 +122,7 @@ export default function ImportOrder() {
       setSheets(parsed)
       setSheetIndex(0)
       setChosenSheets([0])
+      setHeaderRows({})
 
       // Any saved template for this supplier?
       if (supplierId) {
@@ -172,7 +174,7 @@ export default function ImportOrder() {
       if (sheetRows.length === 0) continue
 
       // Find this sheet's header row by matching the headings we know.
-      let hRow = si === sheetIndex ? headerRow : null
+      let hRow = headerRows[si] ?? (si === sheetIndex ? headerRow : null)
       if (hRow == null) {
         let best = 0
         sheetRows.slice(0, 40).forEach((row, i) => {
@@ -230,7 +232,20 @@ export default function ImportOrder() {
         }
       }
 
-      perSheet.push({ name: sheets[si].name, lines: sheetLines, found: true })
+      const missingCols = Object.entries(fieldHeaders)
+        .filter(([, header]) => header && idxOf(header) === -1)
+        .map(([f]) => f)
+      const missingSizes = Object.keys(sizeHeaders).filter((h) => !rowCells.includes(h))
+
+      perSheet.push({
+        name: sheets[si].name,
+        lines: sheetLines,
+        found: true,
+        headerRow: hRow + 1,
+        missingCols,
+        missingSizes: missingSizes.length,
+        sizeCount: sizeIdx.length,
+      })
     }
 
     // The same product can appear on more than one sheet, so add the sizes up.
@@ -245,7 +260,7 @@ export default function ImportOrder() {
     const products = new Set(lines.map((l) => l.supplier_sku)).size
     const total = lines.reduce((n, l) => n + l.qty, 0)
     return { lines, products, total, theirTotal, perSheet }
-  }, [sheets, chosenSheets, sheetIndex, headers, headerRow, mapping, sizeCols])
+  }, [sheets, chosenSheets, sheetIndex, headerRows, headers, headerRow, mapping, sizeCols])
 
   // ---- save --------------------------------------------------------------
   async function save() {
@@ -590,7 +605,12 @@ export default function ImportOrder() {
                 className="input"
                 style={{ width: 'auto' }}
                 value={sheetIndex}
-                onChange={(e) => { setSheetIndex(Number(e.target.value)); setHeaderRow(null) }}
+                onChange={(e) => {
+                  const next = Number(e.target.value)
+                  setSheetIndex(next)
+                  setHeaderRow(headerRows[next] ?? null)
+                  if (!chosenSheets.includes(next)) setChosenSheets([...chosenSheets, next])
+                }}
               >
                 {sheets.map((s, i) => <option key={s.name} value={i}>{s.name}</option>)}
               </select>
@@ -608,6 +628,7 @@ export default function ImportOrder() {
               <div className="loc-chips">
                 {sheets.map((sh, i) => {
                   const on = chosenSheets.includes(i)
+                  const row = headerRows[i]
                   return (
                     <button
                       key={sh.name}
@@ -619,10 +640,20 @@ export default function ImportOrder() {
                       }
                     >
                       {sh.name}
+                      {on && (
+                        <span className="chip-note">
+                          {row != null ? `row ${row + 1}` : 'auto'}
+                        </span>
+                      )}
                     </button>
                   )
                 })}
               </div>
+              <p className="field-hint">
+                Switch sheets with the dropdown above and click its heading row if the headings
+                sit somewhere different. Sheets left on <strong>auto</strong> are matched by their
+                heading text.
+              </p>
             </div>
           )}
 
@@ -638,7 +669,10 @@ export default function ImportOrder() {
                   <tr
                     key={i}
                     className={headerRow === i ? 'chosen' : ''}
-                    onClick={() => setHeaderRow(i)}
+                    onClick={() => {
+                      setHeaderRow(i)
+                      setHeaderRows({ ...headerRows, [sheetIndex]: i })
+                    }}
                   >
                     <td className="row-num">{i + 1}</td>
                     {Array.from({ length: Math.min(18, Math.max(...rows.slice(0, 30).map((r) => r?.length ?? 0))) })
@@ -747,6 +781,36 @@ export default function ImportOrder() {
                 )
               })}
             </div>
+
+            {parsed.perSheet.length > 1 && (
+              <div className="sheet-report">
+                {parsed.perSheet.map((sh) => (
+                  <div key={sh.name} className="sheet-report-row">
+                    <span className="cell-strong">{sh.name}</span>
+                    {!sh.found ? (
+                      <span className="status-pill bad">
+                        Headings not found ~ open step 2, switch to this sheet and click its
+                        heading row
+                      </span>
+                    ) : (
+                      <span className="cell-sub">
+                        heading row {sh.headerRow} · {sh.sizeCount} size column
+                        {sh.sizeCount === 1 ? '' : 's'} · {sh.lines} line
+                        {sh.lines === 1 ? '' : 's'}
+                        {sh.missingCols?.length > 0 && (
+                          <span className="days-warn">
+                            {' '}· missing {sh.missingCols.join(', ')}
+                          </span>
+                        )}
+                        {sh.missingSizes > 0 && (
+                          <span className="days-warn"> · {sh.missingSizes} size column(s) absent</span>
+                        )}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div className="page-actions" style={{ marginTop: 16 }}>
               <span className="field-hint" style={{ margin: 0 }}>

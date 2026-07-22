@@ -997,3 +997,12 @@ a.btn { display: inline-block; text-decoration: none; }
 
 .po-select { display: flex; align-items: center; gap: 6px; align-self: center; }
 .po-state { display: flex; align-items: center; gap: 8px; align-self: center; }
+
+.chip-note {
+  margin-left: 6px; font-size: 10px; opacity: 0.75; font-weight: 600;
+}
+.sheet-report {
+  margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--blush);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.sheet-report-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; }
