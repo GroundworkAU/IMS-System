@@ -1011,3 +1011,16 @@ a.btn { display: inline-block; text-decoration: none; }
 .step.clickable { cursor: pointer; }
 .step.clickable:hover { border-color: var(--deep-brown); color: var(--deep-brown); }
 .step:disabled { cursor: not-allowed; opacity: 0.6; }
+
+/* ---------- Barcode lookup comparison ---------- */
+.compare-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+  margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--blush);
+}
+.compare-row { display: flex; align-items: baseline; gap: 8px; margin-top: 4px; }
+.ok-tick { color: #2f5d3a; font-weight: 700; }
+.no-tick { color: var(--red); font-weight: 700; }
+
+@media (max-width: 560px) {
+  .compare-grid { grid-template-columns: 1fr; }
+}
