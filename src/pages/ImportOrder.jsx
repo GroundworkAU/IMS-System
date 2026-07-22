@@ -40,8 +40,8 @@ export default function ImportOrder() {
   const [chosenSheets, setChosenSheets] = useState([0]) // every sheet to read
   const [headerRow, setHeaderRow] = useState(null)   // zero based, current sheet
   const [headerRows, setHeaderRows] = useState({})   // sheetIndex -> row, when set by hand
-  const [mapping, setMapping] = useState({})         // field -> column index
-  const [sizeCols, setSizeCols] = useState({})       // column index -> size label
+  const [mapping, setMapping] = useState({})         // field -> heading text
+  const [sizeCols, setSizeCols] = useState({})       // heading text -> size label
   const [templateId, setTemplateId] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -76,6 +76,29 @@ export default function ImportOrder() {
   const rows = sheet?.rows ?? []
   const headers = headerRow != null ? (rows[headerRow] ?? []) : []
 
+  // Headings from every sheet being read, so a column that only appears on one
+  // of them can still be mapped. Keyed on the text, since that is what the
+  // parser matches on.
+  const allHeadings = useMemo(() => {
+    const found = {}
+    for (const si of chosenSheets) {
+      const sheetRows = sheets[si]?.rows ?? []
+      const hRow = headerRows[si] ?? (si === sheetIndex ? headerRow : null)
+      if (hRow == null) continue
+      ;(sheetRows[hRow] ?? []).forEach((cell, idx) => {
+        const text = cleanHeader(cell)
+        if (!text) return
+        if (!found[text]) {
+          found[text] = { text, raw: cell, sheets: [], col: colLetter(idx) }
+        }
+        if (!found[text].sheets.includes(sheets[si].name)) {
+          found[text].sheets.push(sheets[si].name)
+        }
+      })
+    }
+    return Object.values(found)
+  }, [sheets, chosenSheets, headerRows, sheetIndex, headerRow])
+
   // Apply a saved template by matching header text, so moved columns still work.
   const applyTemplate = useCallback((config, aliases, sheetRows) => {
     const wanted = config.headers ?? {}
@@ -96,19 +119,20 @@ export default function ImportOrder() {
     const rowCells = (sheetRows[bestRow] ?? []).map((c) => cleanHeader(c))
     const nextMapping = {}
     for (const [field, header] of Object.entries(wanted)) {
-      const idx = rowCells.findIndex((c) => c.toLowerCase() === header.toLowerCase())
-      if (idx !== -1) nextMapping[field] = idx
+      const found = rowCells.find((c) => c.toLowerCase() === header.toLowerCase())
+      if (found) nextMapping[field] = found
     }
 
     const nextSizes = {}
     rowCells.forEach((cell, idx) => {
       if (!cell) return
       if (sizeNames.some((s) => s.toLowerCase() === cell.toLowerCase())) {
-        nextSizes[idx] = aliases?.[cell] ?? guessSize(sheetRows[bestRow][idx])
+        nextSizes[cell] = aliases?.[cell] ?? guessSize(sheetRows[bestRow][idx])
       }
     })
 
     setHeaderRow(bestRow)
+    setHeaderRows({ 0: bestRow })
     setMapping(nextMapping)
     setSizeCols(nextSizes)
     return true
@@ -152,16 +176,16 @@ export default function ImportOrder() {
   // mapping works across sheets that are laid out slightly differently.
   const parsed = useMemo(() => {
     const empty = { lines: [], products: 0, total: 0, theirTotal: 0, perSheet: [] }
-    if (headerRow == null || mapping.supplier_sku == null) return empty
+    if (headerRow == null || !mapping.supplier_sku) return empty
 
     const fieldHeaders = {}
-    for (const [field, idx] of Object.entries(mapping)) {
-      if (idx == null) continue
-      fieldHeaders[field] = cleanHeader(headers[idx]).toLowerCase()
+    for (const [field, text] of Object.entries(mapping)) {
+      if (!text) continue
+      fieldHeaders[field] = String(text).toLowerCase()
     }
     const sizeHeaders = {}
-    for (const [idx, label] of Object.entries(sizeCols)) {
-      sizeHeaders[cleanHeader(headers[Number(idx)]).toLowerCase()] = label
+    for (const [text, label] of Object.entries(sizeCols)) {
+      sizeHeaders[String(text).toLowerCase()] = label
     }
     const targets = Object.values(fieldHeaders).concat(Object.keys(sizeHeaders))
 
@@ -260,7 +284,7 @@ export default function ImportOrder() {
     const products = new Set(lines.map((l) => l.supplier_sku)).size
     const total = lines.reduce((n, l) => n + l.qty, 0)
     return { lines, products, total, theirTotal, perSheet }
-  }, [sheets, chosenSheets, sheetIndex, headerRows, headers, headerRow, mapping, sizeCols])
+  }, [sheets, chosenSheets, sheetIndex, headerRows, headerRow, mapping, sizeCols])
 
   // ---- save --------------------------------------------------------------
   async function save() {
@@ -423,15 +447,11 @@ export default function ImportOrder() {
     // Remember how this file was read.
     const config = {
       headers: Object.fromEntries(
-        Object.entries(mapping)
-          .filter(([, idx]) => idx != null)
-          .map(([field, idx]) => [field, cleanHeader(headers[idx])])
+        Object.entries(mapping).filter(([, text]) => !!text)
       ),
-      sizes: Object.keys(sizeCols).map((idx) => cleanHeader(headers[Number(idx)])),
+      sizes: Object.keys(sizeCols),
     }
-    const aliases = Object.fromEntries(
-      Object.entries(sizeCols).map(([idx, label]) => [cleanHeader(headers[Number(idx)]), label])
-    )
+    const aliases = { ...sizeCols }
 
     await supabase.from('import_templates').upsert(
       {
@@ -476,7 +496,7 @@ export default function ImportOrder() {
             n === 1 ||
             (n === 2 && sheets.length > 0) ||
             (n === 3 && headerRow != null) ||
-            (n === 4 && mapping.supplier_sku != null && Object.keys(sizeCols).length > 0)
+            (n === 4 && !!mapping.supplier_sku && Object.keys(sizeCols).length > 0)
 
           return (
             <button
@@ -735,18 +755,17 @@ export default function ImportOrder() {
                     onChange={(e) =>
                       setMapping({
                         ...mapping,
-                        [f.key]: e.target.value === '' ? undefined : Number(e.target.value),
+                        [f.key]: e.target.value === '' ? undefined : e.target.value,
                       })
                     }
                   >
                     <option value="">Not in this file</option>
-                    {headers.map((h, i) =>
-                      cleanHeader(h) ? (
-                        <option key={i} value={i}>
-                          {colLetter(i)} · {cleanHeader(h).slice(0, 40)}
-                        </option>
-                      ) : null
-                    )}
+                    {allHeadings.map((h) => (
+                      <option key={h.text} value={h.text}>
+                        {h.text.slice(0, 44)}
+                        {chosenSheets.length > 1 ? ` · ${h.sheets.join(', ')}` : ''}
+                      </option>
+                    ))}
                   </select>
                   <p className="field-hint">{f.hint}</p>
                 </div>
@@ -765,13 +784,11 @@ export default function ImportOrder() {
             </p>
 
             <div className="size-map">
-              {headers.map((h, i) => {
-                const label = cleanHeader(h)
-                if (!label) return null
-                const on = sizeCols[i] != null
-                const mapped = Object.values(mapping).includes(i)
+              {allHeadings.map((h) => {
+                const on = sizeCols[h.text] != null
+                const mapped = Object.values(mapping).includes(h.text)
                 return (
-                  <div key={i} className={'size-map-row' + (on ? ' on' : '')}>
+                  <div key={h.text} className={'size-map-row' + (on ? ' on' : '')}>
                     <label className="check-row" style={{ margin: 0, flex: '1 1 auto' }}>
                       <input
                         type="checkbox"
@@ -779,14 +796,16 @@ export default function ImportOrder() {
                         disabled={mapped}
                         onChange={() => {
                           const next = { ...sizeCols }
-                          if (on) delete next[i]
-                          else next[i] = guessSize(h)
+                          if (on) delete next[h.text]
+                          else next[h.text] = guessSize(h.raw)
                           setSizeCols(next)
                         }}
                       />
                       <span>
-                        <span className="cell-strong">{colLetter(i)}</span>{' '}
-                        <span className="cell-sub">{label.slice(0, 50)}</span>
+                        <span className="cell-sub">{h.text.slice(0, 50)}</span>
+                        {chosenSheets.length > 1 && (
+                          <span className="cell-sub"> · {h.sheets.join(', ')}</span>
+                        )}
                         {mapped && <span className="cell-sub"> (used above)</span>}
                       </span>
                     </label>
@@ -794,8 +813,8 @@ export default function ImportOrder() {
                       <input
                         className="input mini"
                         style={{ width: 110 }}
-                        value={sizeCols[i]}
-                        onChange={(e) => setSizeCols({ ...sizeCols, [i]: e.target.value })}
+                        value={sizeCols[h.text]}
+                        onChange={(e) => setSizeCols({ ...sizeCols, [h.text]: e.target.value })}
                       />
                     )}
                   </div>
@@ -870,7 +889,7 @@ export default function ImportOrder() {
               <div className="stat-label">Units</div>
               <div className="stat-value">{parsed.total}</div>
               <div className="stat-note">
-                {mapping.total_check != null
+                {mapping.total_check
                   ? parsed.theirTotal === parsed.total
                     ? 'Matches their total'
                     : `Their total says ${parsed.theirTotal}`
@@ -905,7 +924,7 @@ export default function ImportOrder() {
             </div>
           )}
 
-          {mapping.total_check != null && parsed.theirTotal !== parsed.total && (
+          {mapping.total_check && parsed.theirTotal !== parsed.total && (
             <div className="auth-msg err" style={{ marginBottom: 16 }}>
               Our total does not match theirs. Check the size columns ~ one may be missed or
               double counted.
@@ -923,7 +942,7 @@ export default function ImportOrder() {
                 <thead>
                   <tr>
                     <th>Code</th><th>Product</th><th>Colour</th><th>Size</th>
-                    {mapping.barcode != null && <th>Barcode</th>}
+                    {mapping.barcode && <th>Barcode</th>}
                     <th className="num">Qty</th><th className="num">Cost</th>
                   </tr>
                 </thead>
@@ -934,7 +953,7 @@ export default function ImportOrder() {
                       <td>{l.name}</td>
                       <td>{l.colour || '-'}</td>
                       <td>{l.size}</td>
-                      {mapping.barcode != null && (
+                      {mapping.barcode && (
                         <td className="cell-sub">{l.barcode || '-'}</td>
                       )}
                       <td className="num">{l.qty}</td>
@@ -948,7 +967,7 @@ export default function ImportOrder() {
               )}
             </div>
 
-            {mapping.barcode != null && (
+            {mapping.barcode && (
               <div className="placeholder-note" style={{ marginTop: 12 }}>
                 Barcodes are taken from the product row, so every size on that row gets the same
                 one. That is right for single size products, but if their file lists a barcode per
