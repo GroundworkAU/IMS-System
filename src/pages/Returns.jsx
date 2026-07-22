@@ -39,6 +39,11 @@ export default function Returns() {
   const [reasons, setReasons] = useState([])
   const [managingReasons, setManagingReasons] = useState(false)
   const [tab, setTab] = useState('open')
+  const [query, setQuery] = useState('')
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
+  const [locationFilter, setLocationFilter] = useState('')
+  const [reasonFilter, setReasonFilter] = useState('')
   const [editing, setEditing] = useState(null)
   const [checking, setChecking] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -65,7 +70,7 @@ export default function Returns() {
     setIntegrations(i.data ?? [])
     setReasons(rr.data ?? [])
     setLoading(false)
-  }, [])
+  }, [query, fromDate, toDate, locationFilter, reasonFilter])
 
   useEffect(() => { load() }, [load])
 
@@ -88,6 +93,38 @@ export default function Returns() {
       setStatus({ type: 'ok', text: 'Return deleted.' })
       load()
     }
+  }
+
+  function exportCsv() {
+    // One row per item returned, so it can be pivoted.
+    const rows = []
+    for (const r of visible) {
+      const lines = r.return_lines ?? []
+      if (lines.length === 0) rows.push({ r, l: null })
+      else for (const l of lines) rows.push({ r, l })
+    }
+
+    downloadCsv(
+      `returns-${new Date().toISOString().slice(0, 10)}.csv`,
+      [
+        { label: 'RMA', value: ({ r }) => r.rma_number },
+        { label: 'Order', value: ({ r }) => r.order_number },
+        { label: 'Customer', value: ({ r }) => customerName(r) },
+        { label: 'Order date', value: ({ r }) => csvDate(r.orders?.order_date) },
+        { label: 'Return date', value: ({ r }) => csvDate(r.return_date) },
+        { label: 'Logged', value: ({ r }) => csvDate(r.created_at) },
+        { label: 'Logged by', value: ({ r }) => r.profiles?.full_name },
+        { label: 'Returned to', value: ({ r }) => r.locations?.name },
+        { label: 'Reason', value: ({ r }) => r.reason },
+        { label: 'Status', value: ({ r }) => r.status },
+        { label: 'Refunded', value: ({ r }) => csvDate(r.refunded_at) },
+        { label: 'Item', value: ({ l }) => l?.order_lines?.name },
+        { label: 'SKU', value: ({ l }) => l?.order_lines?.sku },
+        { label: 'Qty', value: ({ l }) => l?.qty },
+        { label: 'Condition', value: ({ l }) => l?.condition },
+      ],
+      rows
+    )
   }
 
   async function markRefunded(r) {
@@ -186,6 +223,61 @@ export default function Returns() {
             <button className="btn btn-primary" onClick={() => setCreating(true)}>
               Log a return
             </button>
+          </div>
+        </div>
+
+        <div className="filter-bar">
+          <div className="filter-field" style={{ flex: '2 1 200px' }}>
+            <label htmlFor="r-q">Search</label>
+            <input
+              id="r-q"
+              className="input"
+              placeholder="Order or RMA number"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+          <div className="filter-field" style={{ flex: '1 1 150px' }}>
+            <label htmlFor="r-from">Returned from</label>
+            <input id="r-from" className="input" type="date"
+              value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+          </div>
+          <div className="filter-field" style={{ flex: '1 1 150px' }}>
+            <label htmlFor="r-to">To</label>
+            <input id="r-to" className="input" type="date"
+              value={toDate} onChange={(e) => setToDate(e.target.value)} />
+          </div>
+          <div className="filter-field" style={{ flex: '1 1 170px' }}>
+            <label htmlFor="r-loc">Returned to</label>
+            <select id="r-loc" className="input" value={locationFilter}
+              onChange={(e) => setLocationFilter(e.target.value)}>
+              <option value="">Anywhere</option>
+              {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+            </select>
+          </div>
+          <div className="filter-field" style={{ flex: '1 1 170px' }}>
+            <label htmlFor="r-reason">Reason</label>
+            <select id="r-reason" className="input" value={reasonFilter}
+              onChange={(e) => setReasonFilter(e.target.value)}>
+              <option value="">Any reason</option>
+              {reasons.map((r) => <option key={r.id} value={r.label}>{r.label}</option>)}
+            </select>
+          </div>
+          <div className="filter-actions">
+            <button className="btn" onClick={exportCsv} disabled={visible.length === 0}>
+              Export CSV
+            </button>
+            {(query || fromDate || toDate || locationFilter || reasonFilter) && (
+              <button
+                className="btn btn-quiet"
+                onClick={() => {
+                  setQuery(''); setFromDate(''); setToDate('')
+                  setLocationFilter(''); setReasonFilter('')
+                }}
+              >
+                Clear
+              </button>
+            )}
           </div>
         </div>
 

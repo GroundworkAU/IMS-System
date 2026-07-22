@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { loadOrderLines } from '../lib/integrations'
 import Modal from '../components/Modal'
 import { nextReference } from '../lib/references'
+import { downloadCsv, csvDate } from '../lib/csv'
 import OrderIssuesModal from '../components/OrderIssuesModal'
 import { useIntegrationConfigs, orderAdminUrl } from '../lib/platformLinks'
 import { useNavigate } from 'react-router-dom'
@@ -34,6 +35,10 @@ export default function OrderIssues() {
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState(null)
   const [tab, setTab] = useState('open')
+  const [query, setQuery] = useState('')
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
+  const [reasonFilter, setReasonFilter] = useState('')
   const [creating, setCreating] = useState(false)
   const [managingReasons, setManagingReasons] = useState(false)
   const [resolving, setResolving] = useState(null)
@@ -59,7 +64,7 @@ export default function OrderIssues() {
     setReasons(r.data ?? [])
 
     setLoading(false)
-  }, [])
+  }, [query, fromDate, toDate, reasonFilter])
 
   useEffect(() => { load() }, [load])
 
@@ -89,6 +94,38 @@ export default function OrderIssues() {
       setStatus({ type: 'ok', text: 'Issue deleted.' })
       load()
     }
+  }
+
+  function exportCsv() {
+    const rows = []
+    for (const i of visible) {
+      const lines = i.order_issue_lines ?? []
+      if (lines.length === 0) rows.push({ i, l: null })
+      else for (const l of lines) rows.push({ i, l })
+    }
+
+    downloadCsv(
+      `order-issues-${new Date().toISOString().slice(0, 10)}.csv`,
+      [
+        { label: 'Reference', value: ({ i }) => i.reference },
+        { label: 'Order', value: ({ i }) => i.order_number },
+        { label: 'Customer', value: ({ i }) => customerName(i) },
+        { label: 'Order date', value: ({ i }) => csvDate(i.orders?.order_date) },
+        { label: 'Issue', value: ({ i }) => i.reason },
+        { label: 'Notes', value: ({ i }) => i.detail },
+        { label: 'Raised', value: ({ i }) => csvDate(i.created_at) },
+        { label: 'Raised by', value: ({ i }) => i.raised?.full_name },
+        { label: 'Status', value: ({ i }) => i.status },
+        { label: 'Resolved', value: ({ i }) => csvDate(i.resolved_at) },
+        { label: 'Resolved by', value: ({ i }) => i.resolver?.full_name },
+        { label: 'Resolution', value: ({ i }) => i.resolution_note },
+        { label: 'Item', value: ({ l }) => l?.order_lines?.name },
+        { label: 'SKU', value: ({ l }) => l?.order_lines?.sku },
+        { label: 'Qty affected', value: ({ l }) => l?.qty },
+        { label: 'Item note', value: ({ l }) => l?.note },
+      ],
+      rows
+    )
   }
 
   async function reopen(issue) {
@@ -129,6 +166,52 @@ export default function OrderIssues() {
             <button className="btn btn-primary" onClick={() => setCreating(true)}>
               Raise an issue
             </button>
+          </div>
+        </div>
+
+        <div className="filter-bar">
+          <div className="filter-field" style={{ flex: '2 1 200px' }}>
+            <label htmlFor="i-q">Search</label>
+            <input
+              id="i-q"
+              className="input"
+              placeholder="Order or issue reference"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+          <div className="filter-field" style={{ flex: '1 1 150px' }}>
+            <label htmlFor="i-from">Raised from</label>
+            <input id="i-from" className="input" type="date"
+              value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+          </div>
+          <div className="filter-field" style={{ flex: '1 1 150px' }}>
+            <label htmlFor="i-to">To</label>
+            <input id="i-to" className="input" type="date"
+              value={toDate} onChange={(e) => setToDate(e.target.value)} />
+          </div>
+          <div className="filter-field" style={{ flex: '1 1 190px' }}>
+            <label htmlFor="i-reason">Issue</label>
+            <select id="i-reason" className="input" value={reasonFilter}
+              onChange={(e) => setReasonFilter(e.target.value)}>
+              <option value="">Any issue</option>
+              {reasons.map((r) => <option key={r.id} value={r.label}>{r.label}</option>)}
+            </select>
+          </div>
+          <div className="filter-actions">
+            <button className="btn" onClick={exportCsv} disabled={visible.length === 0}>
+              Export CSV
+            </button>
+            {(query || fromDate || toDate || reasonFilter) && (
+              <button
+                className="btn btn-quiet"
+                onClick={() => {
+                  setQuery(''); setFromDate(''); setToDate(''); setReasonFilter('')
+                }}
+              >
+                Clear
+              </button>
+            )}
           </div>
         </div>
 
