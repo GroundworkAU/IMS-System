@@ -1,0 +1,569 @@
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { supabase } from '../lib/supabase'
+import { useAuth } from '../context/AuthContext'
+import BackLink from '../components/BackLink'
+import { readWorkbook, colLetter, cleanHeader, guessSize, isNumeric, toNumber } from '../lib/sheet'
+
+// What we need out of a supplier's file, whatever they call it.
+const FIELDS = [
+  { key: 'supplier_sku', label: 'Supplier code', hint: 'Their product code, e.g. Code or MATERIAL ID', required: true },
+  { key: 'name', label: 'Product description', hint: 'The product name', required: true },
+  { key: 'colour', label: 'Colour', hint: 'Optional' },
+  { key: 'unit_cost', label: 'Cost per unit', hint: 'What you pay, e.g. WHL per Pc or NET PRICE' },
+  { key: 'retail_price', label: 'Recommended retail', hint: 'Optional' },
+  { key: 'total_check', label: 'Their total column', hint: 'Optional, used to check our maths' },
+]
+
+export default function ImportOrder() {
+  const { profile } = useAuth()
+  const navigate = useNavigate()
+
+  const [step, setStep] = useState(1)
+  const [suppliers, setSuppliers] = useState([])
+  const [brands, setBrands] = useState([])
+  const [supplierId, setSupplierId] = useState('')
+  const [brandId, setBrandId] = useState('')
+  const [orderYear, setOrderYear] = useState(new Date().getFullYear() + 1)
+  const [orderType, setOrderType] = useState('new')
+  const [reference, setReference] = useState('')
+
+  const [file, setFile] = useState(null)
+  const [sheets, setSheets] = useState([])
+  const [sheetIndex, setSheetIndex] = useState(0)
+  const [headerRow, setHeaderRow] = useState(null)   // zero based
+  const [mapping, setMapping] = useState({})         // field -> column index
+  const [sizeCols, setSizeCols] = useState({})       // column index -> size label
+  const [templateId, setTemplateId] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    supabase.from('suppliers').select('id, name').eq('is_active', true).order('name')
+      .then(({ data }) => setSuppliers(data ?? []))
+  }, [])
+
+  useEffect(() => {
+    if (!supplierId) { setBrands([]); return }
+    supabase.from('brands').select('id, name').eq('supplier_id', supplierId).order('name')
+      .then(({ data }) => setBrands(data ?? []))
+  }, [supplierId])
+
+  const sheet = sheets[sheetIndex]
+  const rows = sheet?.rows ?? []
+  const headers = headerRow != null ? (rows[headerRow] ?? []) : []
+
+  // Apply a saved template by matching header text, so moved columns still work.
+  const applyTemplate = useCallback((config, aliases, sheetRows) => {
+    const wanted = config.headers ?? {}
+    const sizeNames = config.sizes ?? []
+
+    let bestRow = null
+    let bestScore = 0
+    const targets = Object.values(wanted).concat(sizeNames).map((h) => h.toLowerCase())
+
+    sheetRows.slice(0, 40).forEach((row, i) => {
+      const cells = (row ?? []).map((c) => cleanHeader(c).toLowerCase()).filter(Boolean)
+      const score = cells.filter((c) => targets.includes(c)).length
+      if (score > bestScore) { bestScore = score; bestRow = i }
+    })
+
+    if (bestRow == null || bestScore < 2) return false
+
+    const rowCells = (sheetRows[bestRow] ?? []).map((c) => cleanHeader(c))
+    const nextMapping = {}
+    for (const [field, header] of Object.entries(wanted)) {
+      const idx = rowCells.findIndex((c) => c.toLowerCase() === header.toLowerCase())
+      if (idx !== -1) nextMapping[field] = idx
+    }
+
+    const nextSizes = {}
+    rowCells.forEach((cell, idx) => {
+      if (!cell) return
+      if (sizeNames.some((s) => s.toLowerCase() === cell.toLowerCase())) {
+        nextSizes[idx] = aliases?.[cell] ?? guessSize(sheetRows[bestRow][idx])
+      }
+    })
+
+    setHeaderRow(bestRow)
+    setMapping(nextMapping)
+    setSizeCols(nextSizes)
+    return true
+  }, [])
+
+  async function handleFile(f) {
+    setError(null)
+    setFile(f)
+    try {
+      const parsed = await readWorkbook(f)
+      setSheets(parsed)
+      setSheetIndex(0)
+
+      // Any saved template for this supplier?
+      if (supplierId) {
+        const { data: tpl } = await supabase
+          .from('import_templates')
+          .select('id, column_config, size_aliases')
+          .eq('supplier_id', supplierId)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        if (tpl?.column_config) {
+          setTemplateId(tpl.id)
+          const ok = applyTemplate(tpl.column_config, tpl.size_aliases, parsed[0].rows)
+          setStep(ok ? 4 : 2)
+          return
+        }
+      }
+      setStep(2)
+    } catch (err) {
+      setError(`Could not read that file: ${err.message}`)
+    }
+  }
+
+  // ---- parse -------------------------------------------------------------
+  const parsed = useMemo(() => {
+    if (headerRow == null || !mapping.supplier_sku) return { lines: [], products: 0, total: 0, theirTotal: 0 }
+
+    const out = []
+    let theirTotal = 0
+
+    for (let r = headerRow + 1; r < rows.length; r += 1) {
+      const row = rows[r] ?? []
+      const code = row[mapping.supplier_sku]
+      if (code == null || String(code).trim() === '') continue
+      // Skip summary rows.
+      if (/^total/i.test(String(code).trim())) continue
+
+      const name = mapping.name != null ? row[mapping.name] : null
+      const colour = mapping.colour != null ? row[mapping.colour] : null
+      const cost = mapping.unit_cost != null ? toNumber(row[mapping.unit_cost]) : 0
+      const rrp = mapping.retail_price != null ? toNumber(row[mapping.retail_price]) : 0
+      if (mapping.total_check != null) theirTotal += toNumber(row[mapping.total_check])
+
+      for (const [colIdx, sizeLabel] of Object.entries(sizeCols)) {
+        const qty = toNumber(row[Number(colIdx)])
+        if (!qty || qty <= 0) continue
+        out.push({
+          supplier_sku: String(code).trim(),
+          name: name == null ? '' : String(name).trim(),
+          colour: colour == null ? null : String(colour).trim(),
+          size: sizeLabel,
+          qty,
+          unit_cost: cost,
+          retail_price: rrp,
+        })
+      }
+    }
+
+    const products = new Set(out.map((l) => l.supplier_sku)).size
+    const total = out.reduce((n, l) => n + l.qty, 0)
+    return { lines: out, products, total, theirTotal }
+  }, [rows, headerRow, mapping, sizeCols])
+
+  // ---- save --------------------------------------------------------------
+  async function save() {
+    if (!supplierId || !brandId) return setError('Choose the supplier and brand.')
+    if (parsed.lines.length === 0) return setError('Nothing to import ~ check the mapping.')
+
+    setBusy(true)
+    setError(null)
+
+    const { data: order, error: oErr } = await supabase
+      .from('purchase_orders')
+      .insert({
+        org_id: profile.org_id,
+        reference: reference.trim() || `${file?.name?.replace(/\.[^.]+$/, '') ?? 'Order'}`,
+        brand_id: brandId,
+        supplier_id: supplierId,
+        order_year: Number(orderYear),
+        order_type: orderType,
+        status: 'confirmed',
+        source_file_name: file?.name ?? null,
+        created_by: profile.id,
+      })
+      .select('id')
+      .single()
+
+    if (oErr) {
+      setBusy(false)
+      return setError(oErr.code === '23505' ? 'An order with that reference already exists.' : oErr.message)
+    }
+
+    const { error: lErr } = await supabase.from('purchase_order_lines').insert(
+      parsed.lines.map((l) => ({
+        org_id: profile.org_id,
+        po_id: order.id,
+        supplier_sku: l.supplier_sku,
+        supplier_product_name: l.name,
+        colour: l.colour,
+        option_name: l.size,
+        qty_ordered: l.qty,
+        unit_cost: l.unit_cost,
+        retail_price: l.retail_price,
+      }))
+    )
+
+    if (lErr) { setBusy(false); return setError(lErr.message) }
+
+    // Remember how this file was read.
+    const config = {
+      headers: Object.fromEntries(
+        Object.entries(mapping).map(([field, idx]) => [field, cleanHeader(headers[idx])])
+      ),
+      sizes: Object.keys(sizeCols).map((idx) => cleanHeader(headers[Number(idx)])),
+    }
+    const aliases = Object.fromEntries(
+      Object.entries(sizeCols).map(([idx, label]) => [cleanHeader(headers[Number(idx)]), label])
+    )
+
+    await supabase.from('import_templates').upsert(
+      {
+        ...(templateId ? { id: templateId } : {}),
+        org_id: profile.org_id,
+        supplier_id: supplierId,
+        name: 'Order confirmation',
+        source_format: 'excel',
+        column_config: config,
+        size_aliases: aliases,
+        last_used_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'id' }
+    )
+
+    setBusy(false)
+    navigate(`/purchase-orders/${order.id}`)
+  }
+
+  // ---- render ------------------------------------------------------------
+  return (
+    <div>
+      <BackLink to="/purchase-orders" label="Back to purchase orders" />
+
+      <div className="page-head">
+        <div className="eyebrow">Purchasing</div>
+        <h2 className="page-title">Import a supplier order</h2>
+        <p className="page-desc">
+          Upload the confirmation your supplier sent. Sizes usually run across the columns ~ tell
+          us which ones once, and we will remember it for next time.
+        </p>
+      </div>
+
+      {error && <div className="auth-msg err" style={{ marginBottom: 16 }}>{error}</div>}
+
+      <div className="steps">
+        {['Order details', 'Find the table', 'Map the columns', 'Check and import'].map((label, i) => (
+          <div key={label} className={'step' + (step === i + 1 ? ' active' : step > i + 1 ? ' done' : '')}>
+            <span className="step-num">{i + 1}</span>
+            {label}
+          </div>
+        ))}
+      </div>
+
+      {/* ---- 1. order details ---- */}
+      {step === 1 && (
+        <div className="card">
+          <h3 className="section-title">Which order is this?</h3>
+          <div className="form-row">
+            <div className="field" style={{ flex: '1 1 220px' }}>
+              <label htmlFor="sup">Supplier</label>
+              <select id="sup" className="input" value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+                <option value="">Choose...</option>
+                {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <div className="field" style={{ flex: '1 1 200px' }}>
+              <label htmlFor="brand">Brand</label>
+              <select id="brand" className="input" value={brandId} onChange={(e) => setBrandId(e.target.value)}>
+                <option value="">Choose...</option>
+                {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+              {supplierId && brands.length === 0 && (
+                <p className="field-hint">
+                  That supplier has no brands linked yet. Add one under Suppliers &amp; Brands.
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="form-row">
+            <div className="field" style={{ flex: '0 1 140px' }}>
+              <label htmlFor="year">Season / year</label>
+              <input id="year" className="input" type="number" value={orderYear}
+                onChange={(e) => setOrderYear(e.target.value)} />
+            </div>
+            <div className="field" style={{ flex: '0 1 180px' }}>
+              <label htmlFor="type">Order type</label>
+              <select id="type" className="input" value={orderType} onChange={(e) => setOrderType(e.target.value)}>
+                <option value="new">New products</option>
+                <option value="indent">Indent ~ existing products</option>
+              </select>
+            </div>
+            <div className="field" style={{ flex: '1 1 220px' }}>
+              <label htmlFor="ref">Your reference</label>
+              <input id="ref" className="input" placeholder="e.g. 2027 Venue Retail Order"
+                value={reference} onChange={(e) => setReference(e.target.value)} />
+            </div>
+          </div>
+
+          <div className="field">
+            <label htmlFor="file">The supplier's file</label>
+            <input
+              id="file"
+              className="input"
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              disabled={!supplierId || !brandId}
+              onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
+            />
+            <p className="field-hint">
+              Excel or CSV. Choose the supplier first so we can reuse their mapping.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ---- 2. find the header row ---- */}
+      {step === 2 && sheet && (
+        <div className="card">
+          <div className="card-head">
+            <h3 className="section-title" style={{ margin: 0 }}>Which row holds the column headings?</h3>
+            {sheets.length > 1 && (
+              <select
+                className="input"
+                style={{ width: 'auto' }}
+                value={sheetIndex}
+                onChange={(e) => { setSheetIndex(Number(e.target.value)); setHeaderRow(null) }}
+              >
+                {sheets.map((s, i) => <option key={s.name} value={i}>{s.name}</option>)}
+              </select>
+            )}
+          </div>
+
+          <p className="page-desc" style={{ marginBottom: 12 }}>
+            Click the row that names the columns ~ the one with things like Code, Description and
+            the sizes.
+          </p>
+
+          <div className="sheet-preview">
+            <table className="sheet-table">
+              <tbody>
+                {rows.slice(0, 30).map((row, i) => (
+                  <tr
+                    key={i}
+                    className={headerRow === i ? 'chosen' : ''}
+                    onClick={() => setHeaderRow(i)}
+                  >
+                    <td className="row-num">{i + 1}</td>
+                    {Array.from({ length: Math.min(18, Math.max(...rows.slice(0, 30).map((r) => r?.length ?? 0))) })
+                      .map((_, c) => (
+                        <td key={c}>{row?.[c] == null ? '' : String(row[c]).slice(0, 18)}</td>
+                      ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="page-actions" style={{ marginTop: 16 }}>
+            <span className="field-hint" style={{ margin: 0 }}>
+              {headerRow == null ? 'Nothing chosen yet' : `Row ${headerRow + 1} selected`}
+            </span>
+            <div className="request-bar-actions">
+              <button className="btn" onClick={() => setStep(1)}>Back</button>
+              <button className="btn btn-primary" disabled={headerRow == null} onClick={() => setStep(3)}>
+                Next
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---- 3. map columns ---- */}
+      {step === 3 && (
+        <>
+          <div className="card" style={{ marginBottom: 16 }}>
+            <h3 className="section-title">What does each column mean?</h3>
+            <div className="map-grid">
+              {FIELDS.map((f) => (
+                <div key={f.key} className="field" style={{ marginBottom: 0 }}>
+                  <label>{f.label}{f.required && ' *'}</label>
+                  <select
+                    className="input"
+                    value={mapping[f.key] ?? ''}
+                    onChange={(e) =>
+                      setMapping({
+                        ...mapping,
+                        [f.key]: e.target.value === '' ? undefined : Number(e.target.value),
+                      })
+                    }
+                  >
+                    <option value="">Not in this file</option>
+                    {headers.map((h, i) =>
+                      cleanHeader(h) ? (
+                        <option key={i} value={i}>
+                          {colLetter(i)} · {cleanHeader(h).slice(0, 40)}
+                        </option>
+                      ) : null
+                    )}
+                  </select>
+                  <p className="field-hint">{f.hint}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-head">
+              <h3 className="section-title" style={{ margin: 0 }}>Which columns are sizes?</h3>
+              <span className="cell-sub">{Object.keys(sizeCols).length} selected</span>
+            </div>
+            <p className="page-desc" style={{ marginBottom: 12 }}>
+              Tick every column that holds a quantity for a size. Correct the size name if their
+              heading is messy ~ we will remember your wording.
+            </p>
+
+            <div className="size-map">
+              {headers.map((h, i) => {
+                const label = cleanHeader(h)
+                if (!label) return null
+                const on = sizeCols[i] != null
+                const mapped = Object.values(mapping).includes(i)
+                return (
+                  <div key={i} className={'size-map-row' + (on ? ' on' : '')}>
+                    <label className="check-row" style={{ margin: 0, flex: '1 1 auto' }}>
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        disabled={mapped}
+                        onChange={() => {
+                          const next = { ...sizeCols }
+                          if (on) delete next[i]
+                          else next[i] = guessSize(h)
+                          setSizeCols(next)
+                        }}
+                      />
+                      <span>
+                        <span className="cell-strong">{colLetter(i)}</span>{' '}
+                        <span className="cell-sub">{label.slice(0, 50)}</span>
+                        {mapped && <span className="cell-sub"> (used above)</span>}
+                      </span>
+                    </label>
+                    {on && (
+                      <input
+                        className="input mini"
+                        style={{ width: 110 }}
+                        value={sizeCols[i]}
+                        onChange={(e) => setSizeCols({ ...sizeCols, [i]: e.target.value })}
+                      />
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            <div className="page-actions" style={{ marginTop: 16 }}>
+              <span className="field-hint" style={{ margin: 0 }}>
+                {parsed.lines.length} lines found with these settings
+              </span>
+              <div className="request-bar-actions">
+                <button className="btn" onClick={() => setStep(2)}>Back</button>
+                <button
+                  className="btn btn-primary"
+                  disabled={!mapping.supplier_sku || Object.keys(sizeCols).length === 0}
+                  onClick={() => setStep(4)}
+                >
+                  Preview
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ---- 4. preview ---- */}
+      {step === 4 && (
+        <>
+          <div className="grid grid-3" style={{ marginBottom: 16 }}>
+            <div className="card">
+              <div className="stat-label">Products</div>
+              <div className="stat-value">{parsed.products}</div>
+              <div className="stat-note">Distinct supplier codes</div>
+            </div>
+            <div className="card">
+              <div className="stat-label">Lines</div>
+              <div className="stat-value">{parsed.lines.length}</div>
+              <div className="stat-note">One per size with a quantity</div>
+            </div>
+            <div className="card">
+              <div className="stat-label">Units</div>
+              <div className="stat-value">{parsed.total}</div>
+              <div className="stat-note">
+                {mapping.total_check != null
+                  ? parsed.theirTotal === parsed.total
+                    ? 'Matches their total'
+                    : `Their total says ${parsed.theirTotal}`
+                  : 'No total column mapped'}
+              </div>
+            </div>
+          </div>
+
+          {mapping.total_check != null && parsed.theirTotal !== parsed.total && (
+            <div className="auth-msg err" style={{ marginBottom: 16 }}>
+              Our total does not match theirs. Check the size columns ~ one may be missed or
+              double counted.
+            </div>
+          )}
+
+          <div className="card">
+            <div className="card-head">
+              <h3 className="section-title" style={{ margin: 0 }}>What will be imported</h3>
+              <button className="btn" onClick={() => setStep(3)}>Change the mapping</button>
+            </div>
+
+            <div className="table-wrap" style={{ maxHeight: '52vh', overflowY: 'auto' }}>
+              <table className="variant-table">
+                <thead>
+                  <tr>
+                    <th>Code</th><th>Product</th><th>Colour</th><th>Size</th>
+                    <th className="num">Qty</th><th className="num">Cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {parsed.lines.slice(0, 300).map((l, i) => (
+                    <tr key={i}>
+                      <td className="cell-strong">{l.supplier_sku}</td>
+                      <td>{l.name}</td>
+                      <td>{l.colour || '-'}</td>
+                      <td>{l.size}</td>
+                      <td className="num">{l.qty}</td>
+                      <td className="num">{l.unit_cost ? l.unit_cost.toFixed(2) : '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {parsed.lines.length > 300 && (
+                <p className="field-hint">Showing the first 300 of {parsed.lines.length}.</p>
+              )}
+            </div>
+
+            <div className="page-actions" style={{ marginTop: 16 }}>
+              <span className="field-hint" style={{ margin: 0 }}>
+                Nothing is sent to Lightspeed yet ~ that is a separate step once you have checked
+                this.
+              </span>
+              <div className="request-bar-actions">
+                <button className="btn" onClick={() => navigate('/purchase-orders')}>Cancel</button>
+                <button className="btn btn-primary" onClick={save} disabled={busy}>
+                  {busy ? 'Importing...' : 'Import order'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}

@@ -932,3 +932,44 @@ a.btn { display: inline-block; text-decoration: none; }
 .closed-figures { display: flex; gap: 6px; flex: none; align-items: center; }
 .closed-group { margin-bottom: 16px; }
 .closed-group:last-child { margin-bottom: 0; }
+
+/* ---------- Import wizard ---------- */
+.steps { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.step {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px; border-radius: 20px; font-size: 13px; font-weight: 600;
+  background: var(--surface); border: 1px solid var(--blush); color: var(--muted);
+}
+.step.active { border-color: var(--deep-brown); color: var(--deep-brown); }
+.step.done { color: var(--dark-brown); }
+.step-num {
+  width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--cream); font-size: 11px; font-weight: 700;
+}
+.step.active .step-num { background: var(--deep-brown); color: var(--cream); }
+.step.done .step-num { background: var(--dark-brown); color: var(--cream); }
+
+.sheet-preview { overflow: auto; max-height: 420px; border: 1px solid var(--blush); border-radius: 8px; }
+.sheet-table { border-collapse: collapse; font-size: 12px; white-space: nowrap; }
+.sheet-table td {
+  border: 1px solid var(--cream); padding: 4px 8px; max-width: 160px;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.sheet-table tr:hover td { background: var(--cream); cursor: pointer; }
+.sheet-table tr.chosen td { background: var(--blush); font-weight: 600; }
+.sheet-table .row-num {
+  position: sticky; left: 0; background: var(--cream);
+  color: var(--muted); font-weight: 700; text-align: right;
+}
+
+.map-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+.size-map { display: flex; flex-direction: column; gap: 4px; max-height: 380px; overflow-y: auto; }
+.size-map-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 10px; border-radius: 8px; border: 1px solid transparent;
+}
+.size-map-row.on { background: var(--cream); border-color: var(--blush); }
+
+@media (max-width: 700px) {
+  .map-grid { grid-template-columns: 1fr; }
+}
