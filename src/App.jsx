@@ -9,6 +9,7 @@ import ResetPassword from './pages/ResetPassword'
 import Dashboard from './pages/Dashboard'
 import PurchaseOrders from './pages/PurchaseOrders'
 import ImportOrder from './pages/ImportOrder'
+import PurchaseOrderDetail from './pages/PurchaseOrderDetail'
 import Suppliers from './pages/Suppliers'
 import Products from './pages/Products'
 import Locations from './pages/Locations'
@@ -44,6 +45,7 @@ export default function App() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/purchase-orders" element={<PurchaseOrders />} />
         <Route path="/purchase-orders/import" element={<ImportOrder />} />
+        <Route path="/purchase-orders/:orderId" element={<PurchaseOrderDetail />} />
         <Route path="/suppliers" element={<Suppliers />} />
         <Route path="/products" element={<Products />} />
         <Route path="/locations" element={<Locations />} />

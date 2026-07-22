@@ -207,6 +207,33 @@ export default function ImportOrder() {
 
     if (lErr) { setBusy(false); return setError(lErr.message) }
 
+    // One row per product, ready for naming and SKUs.
+    const byCode = {}
+    for (const l of parsed.lines) {
+      if (!byCode[l.supplier_sku]) {
+        byCode[l.supplier_sku] = {
+          org_id: profile.org_id,
+          po_id: order.id,
+          supplier_sku: l.supplier_sku,
+          supplier_name: l.name,
+          colour: l.colour,
+          our_name: l.name,
+          sku_prefix: l.supplier_sku,
+          has_variants: false,
+          sizes: new Set(),
+        }
+      }
+      byCode[l.supplier_sku].sizes.add(l.size)
+    }
+
+    const productRows = Object.values(byCode).map(({ sizes, ...row }) => ({
+      ...row,
+      has_variants: sizes.size > 1 || ![...sizes].every((s) => /one\s*size|osfm/i.test(s)),
+    }))
+
+    const { error: pErr } = await supabase.from('po_products').insert(productRows)
+    if (pErr) { setBusy(false); return setError(pErr.message) }
+
     // Remember how this file was read.
     const config = {
       headers: Object.fromEntries(

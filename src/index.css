@@ -973,3 +973,24 @@ a.btn { display: inline-block; text-decoration: none; }
 @media (max-width: 700px) {
   .map-grid { grid-template-columns: 1fr; }
 }
+
+/* ---------- Purchase order product rows ---------- */
+.po-product {
+  display: grid;
+  grid-template-columns: 28px minmax(150px, 1fr) minmax(180px, 1.4fr) minmax(130px, 0.9fr) auto auto;
+  gap: 12px; align-items: end; padding: 12px 14px;
+}
+.po-toggle { background: none; border: none; padding: 0; align-self: center; }
+.po-supplier { align-self: center; min-width: 0; }
+.po-supplier .cell-strong, .po-supplier .cell-sub { display: block; }
+.po-variants { align-self: center; white-space: nowrap; margin: 0; }
+.po-product .stock-chip { align-self: center; }
+.po-product .field label {
+  font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--muted); font-weight: 700; margin-bottom: 4px;
+}
+
+@media (max-width: 900px) {
+  .po-product { grid-template-columns: 28px 1fr; }
+  .po-product .field, .po-variants, .po-product .stock-chip { grid-column: 2; }
+}
