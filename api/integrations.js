@@ -1195,10 +1195,12 @@ async function pushProductsToLightspeed(sb, orgId, variant, creds, poId, product
       continue
     }
 
+    const oneSize = /^(one\s*size(\s*fits\s*(most|all))?|osfm|os|o\/s|n\/?a|single|std|standard)$/i
     const skuFor = (size) => {
       if (!p.has_variants) return prefix
       const clean = String(size ?? '').trim().replace(/\s+/g, '')
-      return clean ? `${prefix}-${clean}` : prefix
+      if (!clean || oneSize.test(clean)) return prefix
+      return `${prefix}-${clean}`
     }
 
     try {
@@ -1221,13 +1223,19 @@ async function pushProductsToLightspeed(sb, orgId, variant, creds, poId, product
       const cost = Number(lines[0]?.unit_cost ?? 0)
       const retail = Number(lines[0]?.retail_price ?? 0)
 
+      // A product whose only line has no size is a plain product, whatever the
+      // flag says.
+      const realSizes = lines.filter(
+        (l) => String(l.option_name ?? '').trim() && !oneSize.test(String(l.option_name).trim())
+      )
+
       let body
-      if (p.has_variants) {
+      if (p.has_variants && realSizes.length > 0) {
         body = {
           name,
           supply_price: cost,
           retail_price: retail,
-          variants: lines.map((l) => ({
+          variants: realSizes.map((l) => ({
             sku: skuFor(l.option_name),
             supply_price: Number(l.unit_cost ?? cost),
             retail_price: Number(l.retail_price ?? retail),

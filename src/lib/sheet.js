@@ -53,3 +53,9 @@ export function normaliseBarcode(value) {
   // Excel sometimes hands back "9327345000123.0"
   return text.replace(/\.0+$/, '')
 }
+
+// Some "sizes" mean there is only one of the thing. Those products should not
+// end up with a variant at all.
+export const ONE_SIZE = /^(one\s*size(\s*fits\s*(most|all))?|osfm|os|o\/s|n\/?a|single|std|standard)$/i
+
+export const isOneSize = (label) => ONE_SIZE.test(String(label ?? '').trim())

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import BackLink from '../components/BackLink'
-import { readWorkbook, colLetter, cleanHeader, guessSize, isNumeric, toNumber, normaliseBarcode } from '../lib/sheet'
+import { readWorkbook, colLetter, cleanHeader, guessSize, isNumeric, toNumber, normaliseBarcode, isOneSize } from '../lib/sheet'
 
 // What we need out of a supplier's file, whatever they call it.
 const FIELDS = [
@@ -245,7 +245,8 @@ export default function ImportOrder() {
             supplier_sku: String(code).trim(),
             name: cName === -1 || row[cName] == null ? '' : String(row[cName]).trim(),
             colour: cColour === -1 || row[cColour] == null ? null : String(row[cColour]).trim(),
-            size: sizeLabel,
+            // A one size column is not a size ~ the product simply has none.
+            size: isOneSize(sizeLabel) ? '' : sizeLabel,
             qty,
             unit_cost: cost,
             retail_price: rrp,
@@ -423,9 +424,10 @@ export default function ImportOrder() {
       byCode[l.supplier_sku].sizes.add(l.size)
     }
 
+    // Variants only where the product actually has sizes.
     const productRows = Object.values(byCode).map(({ sizes, ...row }) => ({
       ...row,
-      has_variants: sizes.size > 1 || ![...sizes].every((s) => /one\s*size|osfm/i.test(s)),
+      has_variants: [...sizes].some((s) => String(s ?? '').trim() !== ''),
     }))
 
     if (productRows.length) {
@@ -808,6 +810,9 @@ export default function ImportOrder() {
                           <span className="cell-sub"> · {h.sheets.join(', ')}</span>
                         )}
                         {mapped && <span className="cell-sub"> (used above)</span>}
+                        {on && isOneSize(sizeCols[h.text]) && (
+                          <span className="cell-sub"> · treated as no size</span>
+                        )}
                       </span>
                     </label>
                     {on && (
@@ -954,7 +959,7 @@ export default function ImportOrder() {
                       <td className="cell-strong">{l.supplier_sku}</td>
                       <td>{l.name}</td>
                       <td>{l.colour || '-'}</td>
-                      <td>{l.size}</td>
+                      <td>{l.size || <span className="cell-sub">no sizes</span>}</td>
                       {mapping.barcode && (
                         <td className="cell-sub">{l.barcode || '-'}</td>
                       )}

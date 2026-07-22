@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import BackLink from '../components/BackLink'
 import { sortVariants } from '../lib/sizes'
+import { isOneSize } from '../lib/sheet'
 import { pushProducts } from '../lib/integrations'
 import BarcodeImport from '../components/BarcodeImport'
 
@@ -18,7 +19,9 @@ export function skuFor(product, size) {
   if (!prefix) return ''
   if (!product.has_variants) return prefix
   const clean = String(size ?? '').trim().replace(/\s+/g, '')
-  return clean ? `${prefix}-${clean}` : prefix
+  // No size, or a one size label, means the SKU is just the prefix.
+  if (!clean || isOneSize(clean)) return prefix
+  return `${prefix}-${clean}`
 }
 
 export default function PurchaseOrderDetail() {
@@ -437,6 +440,7 @@ export default function PurchaseOrderDetail() {
                     <span className="cell-sub">
                       {p.supplier_name}
                       {p.colour ? ` · ${p.colour}` : ''}
+                      {!hasVariants && ' · single product'}
                     </span>
                   </div>
 
@@ -507,7 +511,9 @@ export default function PurchaseOrderDetail() {
                         {productLines.map((l) => (
                           <tr key={l.id}>
                             <td className="cell-strong">
-                              {hasVariants ? l.option_name : <span className="cell-sub">no sizes</span>}
+                              {hasVariants && l.option_name
+                                ? l.option_name
+                                : <span className="cell-sub">no sizes</span>}
                             </td>
                             <td>
                               <code className="code-ref">
