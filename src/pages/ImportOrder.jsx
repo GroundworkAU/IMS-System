@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import BackLink from '../components/BackLink'
-import { readWorkbook, colLetter, cleanHeader, guessSize, isNumeric, toNumber } from '../lib/sheet'
+import { readWorkbook, colLetter, cleanHeader, guessSize, isNumeric, toNumber, normaliseBarcode } from '../lib/sheet'
 
 // What we need out of a supplier's file, whatever they call it.
 const FIELDS = [
@@ -175,7 +175,7 @@ export default function ImportOrder() {
   // Columns are matched by heading text rather than position, so the same
   // mapping works across sheets that are laid out slightly differently.
   const parsed = useMemo(() => {
-    const empty = { lines: [], products: 0, total: 0, theirTotal: 0, perSheet: [] }
+    const empty = { lines: [], products: 0, total: 0, theirTotal: 0, perSheet: [], withBarcode: 0 }
     if (headerRow == null || !mapping.supplier_sku) return empty
 
     const fieldHeaders = {}
@@ -249,7 +249,7 @@ export default function ImportOrder() {
             qty,
             unit_cost: cost,
             retail_price: rrp,
-            barcode: cBarcode === -1 || row[cBarcode] == null ? null : String(row[cBarcode]).trim(),
+            barcode: cBarcode === -1 ? null : normaliseBarcode(row[cBarcode]),
             sheet: sheets[si].name,
           })
           sheetLines += 1
@@ -283,7 +283,8 @@ export default function ImportOrder() {
 
     const products = new Set(lines.map((l) => l.supplier_sku)).size
     const total = lines.reduce((n, l) => n + l.qty, 0)
-    return { lines, products, total, theirTotal, perSheet }
+    const withBarcode = lines.filter((l) => l.barcode).length
+    return { lines, products, total, theirTotal, perSheet, withBarcode }
   }, [sheets, chosenSheets, sheetIndex, headerRows, headerRow, mapping, sizeCols])
 
   // ---- save --------------------------------------------------------------
@@ -855,6 +856,7 @@ export default function ImportOrder() {
             <div className="page-actions" style={{ marginTop: 16 }}>
               <span className="field-hint" style={{ margin: 0 }}>
                 {parsed.lines.length} lines found with these settings
+                {mapping.barcode && ` · ${parsed.withBarcode} with a barcode`}
               </span>
               <div className="request-bar-actions">
                 <button className="btn" onClick={() => setStep(2)}>Back</button>
@@ -969,9 +971,20 @@ export default function ImportOrder() {
 
             {mapping.barcode && (
               <div className="placeholder-note" style={{ marginTop: 12 }}>
-                Barcodes are taken from the product row, so every size on that row gets the same
-                one. That is right for single size products, but if their file lists a barcode per
-                size you will want to import those separately once the order is in.
+                {parsed.withBarcode === 0 ? (
+                  <>
+                    <strong>No barcodes found in that column.</strong> The heading is there but
+                    every row is empty, which is normal when barcodes come later. Import the order
+                    now and use Import barcodes on it once your supplier sends them.
+                  </>
+                ) : (
+                  <>
+                    {parsed.withBarcode} of {parsed.lines.length} lines have a barcode. They are
+                    taken from the product row, so every size on that row gets the same one ~
+                    right for single size products, but if their file lists a barcode per size,
+                    import those separately once the order is in.
+                  </>
+                )}
               </div>
             )}
 

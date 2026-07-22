@@ -38,3 +38,18 @@ export const isNumeric = (v) =>
 
 export const toNumber = (v) =>
   isNumeric(v) ? Number(String(v).replace(/,/g, '')) : 0
+
+// Barcodes come through as numbers surprisingly often, which loses leading
+// zeros and can arrive in exponent form. Put them back to a plain string.
+export function normaliseBarcode(value) {
+  if (value == null || value === '') return null
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return null
+    // Avoid 9.32e+12 style output for long codes.
+    return BigInt(Math.round(value)).toString()
+  }
+  const text = String(value).trim()
+  if (!text) return null
+  // Excel sometimes hands back "9327345000123.0"
+  return text.replace(/\.0+$/, '')
+}
