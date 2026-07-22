@@ -38,10 +38,13 @@ export default function PurchaseOrderDetail() {
   const [pushing, setPushing] = useState(false)
   const [pushResults, setPushResults] = useState(null)
   const [barcodesOpen, setBarcodesOpen] = useState(false)
+  const [imports, setImports] = useState([])
+  const [allocations, setAllocations] = useState([])
+  const [locations, setLocations] = useState([])
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [{ data: o }, { data: p }, { data: l }] = await Promise.all([
+    const [{ data: o }, { data: p }, { data: l }, { data: imp }, { data: locs }] = await Promise.all([
       supabase
         .from('purchase_orders')
         .select('id,reference,order_year,order_type,status,created_at,pushed_at,source_file_name,brands(name),suppliers(name)')
@@ -56,15 +59,49 @@ export default function PurchaseOrderDetail() {
         .from('purchase_order_lines')
         .select('id,supplier_sku,supplier_product_name,colour,option_name,qty_ordered,unit_cost,retail_price,barcode,external_product_id')
         .eq('po_id', orderId),
+      supabase
+        .from('po_imports')
+        .select('id,file_name,sheets,line_count,unit_count,created_at,locations:location_id(name),profiles:imported_by(full_name)')
+        .eq('po_id', orderId)
+        .order('created_at'),
+      supabase.from('locations').select('id, name').eq('is_active', true).order('name'),
     ])
 
     setOrder(o ?? null)
     setProducts(p ?? [])
     setLines(l ?? [])
+    setImports(imp ?? [])
+    setLocations(locs ?? [])
+
+    // The split by location, if the order was imported in parts.
+    const lineIds = (l ?? []).map((x) => x.id)
+    if (lineIds.length) {
+      const alloc = []
+      for (let i = 0; i < lineIds.length; i += 200) {
+        const { data } = await supabase
+          .from('po_allocations')
+          .select('po_line_id, location_id, qty')
+          .in('po_line_id', lineIds.slice(i, i + 200))
+        alloc.push(...(data ?? []))
+      }
+      setAllocations(alloc)
+    } else {
+      setAllocations([])
+    }
+
     setLoading(false)
   }, [orderId])
 
   useEffect(() => { load() }, [load])
+
+  // Which locations actually have stock allocated on this order.
+  const usedLocations = useMemo(() => {
+    const ids = new Set(allocations.map((a) => a.location_id))
+    return locations.filter((l) => ids.has(l.id))
+  }, [allocations, locations])
+
+  const allocFor = (lineId, locationId) =>
+    allocations.find((a) => a.po_line_id === lineId && a.location_id === locationId)?.qty ?? 0
 
   const linesByCode = useMemo(() => {
     const map = {}
@@ -238,6 +275,54 @@ export default function PurchaseOrderDetail() {
         </div>
       </div>
 
+      {imports.length > 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card-head">
+            <h3 className="section-title" style={{ margin: 0 }}>Files imported</h3>
+            <button className="btn" onClick={() => navigate('/purchase-orders/import')}>
+              Add another file
+            </button>
+          </div>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>File</th><th>Destination</th><th>Sheets</th>
+                  <th className="num">Lines</th><th className="num">Units</th><th>Imported</th>
+                </tr>
+              </thead>
+              <tbody>
+                {imports.map((im) => (
+                  <tr key={im.id}>
+                    <td className="cell-strong">{im.file_name || '-'}</td>
+                    <td>
+                      {im.locations?.name
+                        ? <span className="pill">{im.locations.name}</span>
+                        : <span className="cell-sub">Not split</span>}
+                    </td>
+                    <td className="cell-sub">{im.sheets || '-'}</td>
+                    <td className="num">{im.line_count}</td>
+                    <td className="num">{im.unit_count}</td>
+                    <td className="cell-sub">
+                      {new Date(im.created_at).toLocaleDateString('en-AU')} by{' '}
+                      {im.profiles?.full_name || 'someone'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {usedLocations.length === 0 && (
+            <div className="placeholder-note">
+              Nothing on this order is split by location yet. If your supplier sends a file per
+              destination, import each one and choose its location ~ the quantities will be added
+              together and the split recorded.
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="card">
         <div className="card-head">
           <h3 className="section-title" style={{ margin: 0 }}>Names and SKUs</h3>
@@ -410,7 +495,10 @@ export default function PurchaseOrderDetail() {
                           <th>Size</th>
                           <th>SKU that will be created</th>
                           <th>Barcode</th>
-                          <th className="num">Qty</th>
+                          {usedLocations.map((loc) => (
+                            <th key={loc.id} className="num">{loc.name}</th>
+                          ))}
+                          <th className="num">{usedLocations.length ? 'Total' : 'Qty'}</th>
                           <th className="num">Cost</th>
                           <th className="num">RRP</th>
                         </tr>
@@ -434,6 +522,14 @@ export default function PurchaseOrderDetail() {
                                 ? <code className="code-ref">{l.barcode}</code>
                                 : <span className="cell-sub">not yet</span>}
                             </td>
+                            {usedLocations.map((loc) => {
+                              const q = allocFor(l.id, loc.id)
+                              return (
+                                <td key={loc.id} className={'num' + (q === 0 ? ' zero' : '')}>
+                                  {q}
+                                </td>
+                              )
+                            })}
                             <td className="num">{l.qty_ordered}</td>
                             <td className="num">{l.unit_cost ? money(l.unit_cost) : '-'}</td>
                             <td className="num">{l.retail_price ? money(l.retail_price) : '-'}</td>

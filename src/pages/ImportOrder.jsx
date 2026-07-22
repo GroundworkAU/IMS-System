@@ -28,6 +28,11 @@ export default function ImportOrder() {
   const [orderYear, setOrderYear] = useState(new Date().getFullYear() + 1)
   const [orderType, setOrderType] = useState('new')
   const [reference, setReference] = useState('')
+  const [mode, setMode] = useState('new')          // 'new' or 'existing'
+  const [existingOrders, setExistingOrders] = useState([])
+  const [existingOrderId, setExistingOrderId] = useState('')
+  const [locations, setLocations] = useState([])
+  const [destination, setDestination] = useState('')   // '' = not split yet
 
   const [file, setFile] = useState(null)
   const [sheets, setSheets] = useState([])
@@ -43,7 +48,22 @@ export default function ImportOrder() {
   useEffect(() => {
     supabase.from('suppliers').select('id, name').eq('is_active', true).order('name')
       .then(({ data }) => setSuppliers(data ?? []))
+    supabase.from('locations').select('id, name').eq('is_active', true).order('name')
+      .then(({ data }) => setLocations(data ?? []))
   }, [])
+
+  // Orders already started for this supplier, so another file can be added.
+  useEffect(() => {
+    if (!supplierId) { setExistingOrders([]); return }
+    supabase
+      .from('purchase_orders')
+      .select('id, reference, order_year, po_imports(file_name, locations:location_id(name))')
+      .eq('supplier_id', supplierId)
+      .is('pushed_at', null)
+      .order('created_at', { ascending: false })
+      .limit(20)
+      .then(({ data }) => setExistingOrders(data ?? []))
+  }, [supplierId])
 
   useEffect(() => {
     if (!supplierId) { setBrands([]); return }
@@ -230,62 +250,133 @@ export default function ImportOrder() {
   // ---- save --------------------------------------------------------------
   async function save() {
     if (!supplierId || !brandId) return setError('Choose the supplier and brand.')
+    if (mode === 'existing' && !existingOrderId) return setError('Choose the order to add to.')
     if (parsed.lines.length === 0) return setError('Nothing to import ~ check the mapping.')
 
     setBusy(true)
     setError(null)
 
-    const { data: order, error: oErr } = await supabase
-      .from('purchase_orders')
-      .insert({
-        org_id: profile.org_id,
-        reference: reference.trim() || `${file?.name?.replace(/\.[^.]+$/, '') ?? 'Order'}`,
-        brand_id: brandId,
-        supplier_id: supplierId,
-        order_year: Number(orderYear),
-        order_type: orderType,
-        status: 'confirmed',
-        source_file_name: file?.name ?? null,
-        created_by: profile.id,
-      })
-      .select('id')
-      .single()
+    let poId = existingOrderId
 
-    if (oErr) {
-      setBusy(false)
-      return setError(oErr.code === '23505' ? 'An order with that reference already exists.' : oErr.message)
+    if (mode === 'new') {
+      const { data: order, error: oErr } = await supabase
+        .from('purchase_orders')
+        .insert({
+          org_id: profile.org_id,
+          reference: reference.trim() || `${file?.name?.replace(/\.[^.]+$/, '') ?? 'Order'}`,
+          brand_id: brandId,
+          supplier_id: supplierId,
+          order_year: Number(orderYear),
+          order_type: orderType,
+          status: 'confirmed',
+          source_file_name: file?.name ?? null,
+          created_by: profile.id,
+        })
+        .select('id')
+        .single()
+
+      if (oErr) {
+        setBusy(false)
+        return setError(
+          oErr.code === '23505' ? 'An order with that reference already exists.' : oErr.message
+        )
+      }
+      poId = order.id
     }
 
-    const { error: lErr } = await supabase.from('purchase_order_lines').insert(
-      parsed.lines.map((l) => ({
-        org_id: profile.org_id,
-        po_id: order.id,
-        supplier_sku: l.supplier_sku,
-        supplier_product_name: l.name,
-        colour: l.colour,
-        option_name: l.size,
-        qty_ordered: l.qty,
-        unit_cost: l.unit_cost,
-        retail_price: l.retail_price,
-        barcode: l.barcode || null,
-      }))
-    )
+    // What is already on this order, so a second file adds to it rather than
+    // creating the same product twice.
+    const { data: existingLines } = await supabase
+      .from('purchase_order_lines')
+      .select('id, supplier_sku, option_name, qty_ordered')
+      .eq('po_id', poId)
 
-    if (lErr) { setBusy(false); return setError(lErr.message) }
+    const lineKey = (sku, size) => `${sku}||${String(size ?? '').trim().toUpperCase()}`
+    const byKey = {}
+    for (const l of existingLines ?? []) byKey[lineKey(l.supplier_sku, l.option_name)] = l
 
-    // One row per product, ready for naming and SKUs.
+    let units = 0
+
+    for (const l of parsed.lines) {
+      units += l.qty
+      const key = lineKey(l.supplier_sku, l.size)
+      const existing = byKey[key]
+      let lineId = existing?.id
+
+      if (existing) {
+        const { error: uErr } = await supabase
+          .from('purchase_order_lines')
+          .update({
+            qty_ordered: (existing.qty_ordered || 0) + l.qty,
+            ...(l.barcode ? { barcode: l.barcode } : {}),
+          })
+          .eq('id', existing.id)
+        if (uErr) { setBusy(false); return setError(uErr.message) }
+      } else {
+        const { data: inserted, error: iErr } = await supabase
+          .from('purchase_order_lines')
+          .insert({
+            org_id: profile.org_id,
+            po_id: poId,
+            supplier_sku: l.supplier_sku,
+            supplier_product_name: l.name,
+            colour: l.colour,
+            option_name: l.size,
+            qty_ordered: l.qty,
+            unit_cost: l.unit_cost,
+            retail_price: l.retail_price,
+            barcode: l.barcode || null,
+          })
+          .select('id')
+          .single()
+        if (iErr) { setBusy(false); return setError(iErr.message) }
+        lineId = inserted.id
+        byKey[key] = { id: lineId, qty_ordered: l.qty }
+      }
+
+      // Record where this file's stock is going, if we were told.
+      if (destination && lineId) {
+        const { data: alloc } = await supabase
+          .from('po_allocations')
+          .select('id, qty')
+          .match({ po_line_id: lineId, location_id: destination })
+          .maybeSingle()
+
+        if (alloc) {
+          await supabase
+            .from('po_allocations')
+            .update({ qty: (alloc.qty || 0) + l.qty })
+            .eq('id', alloc.id)
+        } else {
+          await supabase.from('po_allocations').insert({
+            org_id: profile.org_id,
+            po_line_id: lineId,
+            location_id: destination,
+            qty: l.qty,
+          })
+        }
+      }
+    }
+
+    // Product rows for anything new on this order.
+    const { data: knownProducts } = await supabase
+      .from('po_products')
+      .select('supplier_sku')
+      .eq('po_id', poId)
+    const known = new Set((knownProducts ?? []).map((p) => p.supplier_sku))
+
     const byCode = {}
     for (const l of parsed.lines) {
+      if (known.has(l.supplier_sku)) continue
       if (!byCode[l.supplier_sku]) {
         byCode[l.supplier_sku] = {
           org_id: profile.org_id,
-          po_id: order.id,
+          po_id: poId,
           supplier_sku: l.supplier_sku,
           supplier_name: l.name,
           colour: l.colour,
           our_name: l.name,
           sku_prefix: l.supplier_sku,
-          has_variants: false,
           sizes: new Set(),
         }
       }
@@ -297,13 +388,29 @@ export default function ImportOrder() {
       has_variants: sizes.size > 1 || ![...sizes].every((s) => /one\s*size|osfm/i.test(s)),
     }))
 
-    const { error: pErr } = await supabase.from('po_products').insert(productRows)
-    if (pErr) { setBusy(false); return setError(pErr.message) }
+    if (productRows.length) {
+      const { error: pErr } = await supabase.from('po_products').insert(productRows)
+      if (pErr) { setBusy(false); return setError(pErr.message) }
+    }
+
+    // Keep a record of the file itself.
+    await supabase.from('po_imports').insert({
+      org_id: profile.org_id,
+      po_id: poId,
+      file_name: file?.name ?? null,
+      sheets: parsed.perSheet.filter((sh) => sh.lines > 0).map((sh) => sh.name).join(', '),
+      location_id: destination || null,
+      line_count: parsed.lines.length,
+      unit_count: units,
+      imported_by: profile.id,
+    })
 
     // Remember how this file was read.
     const config = {
       headers: Object.fromEntries(
-        Object.entries(mapping).map(([field, idx]) => [field, cleanHeader(headers[idx])])
+        Object.entries(mapping)
+          .filter(([, idx]) => idx != null)
+          .map(([field, idx]) => [field, cleanHeader(headers[idx])])
       ),
       sizes: Object.keys(sizeCols).map((idx) => cleanHeader(headers[Number(idx)])),
     }
@@ -327,7 +434,7 @@ export default function ImportOrder() {
     )
 
     setBusy(false)
-    navigate(`/purchase-orders/${order.id}`)
+    navigate(`/purchase-orders/${poId}`)
   }
 
   // ---- render ------------------------------------------------------------
@@ -381,7 +488,62 @@ export default function ImportOrder() {
             </div>
           </div>
 
-          <div className="form-row">
+          <div className="field">
+            <label>Is this a new order, or another file for one you have started?</label>
+            <div className="loc-chips" style={{ marginTop: 4 }}>
+              <button
+                className={'loc-chip' + (mode === 'new' ? ' on' : '')}
+                onClick={() => setMode('new')}
+              >
+                A new order
+              </button>
+              <button
+                className={'loc-chip' + (mode === 'existing' ? ' on' : '')}
+                disabled={existingOrders.length === 0}
+                onClick={() => setMode('existing')}
+              >
+                Add to an existing order
+              </button>
+            </div>
+            {mode === 'existing' && (
+              <select
+                className="input"
+                style={{ marginTop: 10 }}
+                value={existingOrderId}
+                onChange={(e) => setExistingOrderId(e.target.value)}
+              >
+                <option value="">Choose the order...</option>
+                {existingOrders.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.reference} ({o.order_year}) ~ {(o.po_imports ?? []).length} file(s) so far
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          <div className="field">
+            <label htmlFor="dest">Where is this file's stock going?</label>
+            <select
+              id="dest"
+              className="input"
+              style={{ maxWidth: 340 }}
+              value={destination}
+              onChange={(e) => setDestination(e.target.value)}
+            >
+              <option value="">Not split yet ~ these are total quantities</option>
+              {locations.map((l) => (
+                <option key={l.id} value={l.id}>{l.name}</option>
+              ))}
+            </select>
+            <p className="field-hint">
+              If your supplier sends one file per destination, import each in turn and pick its
+              location here. Products are matched across files, so the order ends up with the
+              total and a split by location.
+            </p>
+          </div>
+
+          <div className="form-row" style={mode === 'existing' ? { display: 'none' } : undefined}>
             <div className="field" style={{ flex: '0 1 140px' }}>
               <label htmlFor="year">Season / year</label>
               <input id="year" className="input" type="number" value={orderYear}
@@ -408,7 +570,7 @@ export default function ImportOrder() {
               className="input"
               type="file"
               accept=".xlsx,.xls,.csv"
-              disabled={!supplierId || !brandId}
+              disabled={!supplierId || !brandId || (mode === 'existing' && !existingOrderId)}
               onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
             />
             <p className="field-hint">
@@ -711,13 +873,17 @@ export default function ImportOrder() {
 
             <div className="page-actions" style={{ marginTop: 16 }}>
               <span className="field-hint" style={{ margin: 0 }}>
-                Nothing is sent to Lightspeed yet ~ that is a separate step once you have checked
-                this.
+                {destination
+                  ? `These quantities will be allocated to ${
+                      locations.find((l) => l.id === destination)?.name ?? 'the chosen location'
+                    }.`
+                  : 'These are total quantities, not yet split by location.'}
+                {mode === 'existing' && ' Adding to the order you chose.'}
               </span>
               <div className="request-bar-actions">
                 <button className="btn" onClick={() => navigate('/purchase-orders')}>Cancel</button>
                 <button className="btn btn-primary" onClick={save} disabled={busy}>
-                  {busy ? 'Importing...' : 'Import order'}
+                  {busy ? 'Importing...' : mode === 'existing' ? 'Add to order' : 'Import order'}
                 </button>
               </div>
             </div>
