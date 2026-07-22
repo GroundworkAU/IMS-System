@@ -12,6 +12,7 @@ const FIELDS = [
   { key: 'colour', label: 'Colour', hint: 'Optional' },
   { key: 'unit_cost', label: 'Cost per unit', hint: 'What you pay, e.g. WHL per Pc or NET PRICE' },
   { key: 'retail_price', label: 'Recommended retail', hint: 'Optional' },
+  { key: 'barcode', label: 'Barcode', hint: 'Optional. Only if the file already has them' },
   { key: 'total_check', label: 'Their total column', hint: 'Optional, used to check our maths' },
 ]
 
@@ -30,7 +31,8 @@ export default function ImportOrder() {
 
   const [file, setFile] = useState(null)
   const [sheets, setSheets] = useState([])
-  const [sheetIndex, setSheetIndex] = useState(0)
+  const [sheetIndex, setSheetIndex] = useState(0)      // the sheet used for mapping
+  const [chosenSheets, setChosenSheets] = useState([0]) // every sheet to read
   const [headerRow, setHeaderRow] = useState(null)   // zero based
   const [mapping, setMapping] = useState({})         // field -> column index
   const [sizeCols, setSizeCols] = useState({})       // column index -> size label
@@ -98,6 +100,7 @@ export default function ImportOrder() {
       const parsed = await readWorkbook(f)
       setSheets(parsed)
       setSheetIndex(0)
+      setChosenSheets([0])
 
       // Any saved template for this supplier?
       if (supplierId) {
@@ -123,44 +126,106 @@ export default function ImportOrder() {
   }
 
   // ---- parse -------------------------------------------------------------
+  // Columns are matched by heading text rather than position, so the same
+  // mapping works across sheets that are laid out slightly differently.
   const parsed = useMemo(() => {
-    if (headerRow == null || !mapping.supplier_sku) return { lines: [], products: 0, total: 0, theirTotal: 0 }
+    const empty = { lines: [], products: 0, total: 0, theirTotal: 0, perSheet: [] }
+    if (headerRow == null || mapping.supplier_sku == null) return empty
+
+    const fieldHeaders = {}
+    for (const [field, idx] of Object.entries(mapping)) {
+      if (idx == null) continue
+      fieldHeaders[field] = cleanHeader(headers[idx]).toLowerCase()
+    }
+    const sizeHeaders = {}
+    for (const [idx, label] of Object.entries(sizeCols)) {
+      sizeHeaders[cleanHeader(headers[Number(idx)]).toLowerCase()] = label
+    }
+    const targets = Object.values(fieldHeaders).concat(Object.keys(sizeHeaders))
 
     const out = []
     let theirTotal = 0
+    const perSheet = []
 
-    for (let r = headerRow + 1; r < rows.length; r += 1) {
-      const row = rows[r] ?? []
-      const code = row[mapping.supplier_sku]
-      if (code == null || String(code).trim() === '') continue
-      // Skip summary rows.
-      if (/^total/i.test(String(code).trim())) continue
+    for (const si of chosenSheets) {
+      const sheetRows = sheets[si]?.rows ?? []
+      if (sheetRows.length === 0) continue
 
-      const name = mapping.name != null ? row[mapping.name] : null
-      const colour = mapping.colour != null ? row[mapping.colour] : null
-      const cost = mapping.unit_cost != null ? toNumber(row[mapping.unit_cost]) : 0
-      const rrp = mapping.retail_price != null ? toNumber(row[mapping.retail_price]) : 0
-      if (mapping.total_check != null) theirTotal += toNumber(row[mapping.total_check])
-
-      for (const [colIdx, sizeLabel] of Object.entries(sizeCols)) {
-        const qty = toNumber(row[Number(colIdx)])
-        if (!qty || qty <= 0) continue
-        out.push({
-          supplier_sku: String(code).trim(),
-          name: name == null ? '' : String(name).trim(),
-          colour: colour == null ? null : String(colour).trim(),
-          size: sizeLabel,
-          qty,
-          unit_cost: cost,
-          retail_price: rrp,
+      // Find this sheet's header row by matching the headings we know.
+      let hRow = si === sheetIndex ? headerRow : null
+      if (hRow == null) {
+        let best = 0
+        sheetRows.slice(0, 40).forEach((row, i) => {
+          const cells = (row ?? []).map((c) => cleanHeader(c).toLowerCase()).filter(Boolean)
+          const score = cells.filter((c) => targets.includes(c)).length
+          if (score > best) { best = score; hRow = i }
         })
+        if (best < 2) { perSheet.push({ name: sheets[si].name, lines: 0, found: false }); continue }
       }
+
+      const rowCells = (sheetRows[hRow] ?? []).map((c) => cleanHeader(c).toLowerCase())
+      const idxOf = (header) => (header ? rowCells.indexOf(header) : -1)
+
+      const cCode = idxOf(fieldHeaders.supplier_sku)
+      if (cCode === -1) { perSheet.push({ name: sheets[si].name, lines: 0, found: false }); continue }
+
+      const cName = idxOf(fieldHeaders.name)
+      const cColour = idxOf(fieldHeaders.colour)
+      const cCost = idxOf(fieldHeaders.unit_cost)
+      const cRrp = idxOf(fieldHeaders.retail_price)
+      const cBarcode = idxOf(fieldHeaders.barcode)
+      const cTotal = idxOf(fieldHeaders.total_check)
+
+      const sizeIdx = []
+      rowCells.forEach((cell, i) => {
+        if (cell && sizeHeaders[cell]) sizeIdx.push([i, sizeHeaders[cell]])
+      })
+
+      let sheetLines = 0
+      for (let r = hRow + 1; r < sheetRows.length; r += 1) {
+        const row = sheetRows[r] ?? []
+        const code = row[cCode]
+        if (code == null || String(code).trim() === '') continue
+        if (/^total/i.test(String(code).trim())) continue
+
+        const cost = cCost === -1 ? 0 : toNumber(row[cCost])
+        const rrp = cRrp === -1 ? 0 : toNumber(row[cRrp])
+        if (cTotal !== -1) theirTotal += toNumber(row[cTotal])
+
+        for (const [ci, sizeLabel] of sizeIdx) {
+          const qty = toNumber(row[ci])
+          if (!qty || qty <= 0) continue
+          out.push({
+            supplier_sku: String(code).trim(),
+            name: cName === -1 || row[cName] == null ? '' : String(row[cName]).trim(),
+            colour: cColour === -1 || row[cColour] == null ? null : String(row[cColour]).trim(),
+            size: sizeLabel,
+            qty,
+            unit_cost: cost,
+            retail_price: rrp,
+            barcode: cBarcode === -1 || row[cBarcode] == null ? null : String(row[cBarcode]).trim(),
+            sheet: sheets[si].name,
+          })
+          sheetLines += 1
+        }
+      }
+
+      perSheet.push({ name: sheets[si].name, lines: sheetLines, found: true })
     }
 
-    const products = new Set(out.map((l) => l.supplier_sku)).size
-    const total = out.reduce((n, l) => n + l.qty, 0)
-    return { lines: out, products, total, theirTotal }
-  }, [rows, headerRow, mapping, sizeCols])
+    // The same product can appear on more than one sheet, so add the sizes up.
+    const merged = {}
+    for (const l of out) {
+      const key = `${l.supplier_sku}||${l.size}`
+      if (!merged[key]) merged[key] = { ...l }
+      else merged[key].qty += l.qty
+    }
+    const lines = Object.values(merged)
+
+    const products = new Set(lines.map((l) => l.supplier_sku)).size
+    const total = lines.reduce((n, l) => n + l.qty, 0)
+    return { lines, products, total, theirTotal, perSheet }
+  }, [sheets, chosenSheets, sheetIndex, headers, headerRow, mapping, sizeCols])
 
   // ---- save --------------------------------------------------------------
   async function save() {
@@ -202,6 +267,7 @@ export default function ImportOrder() {
         qty_ordered: l.qty,
         unit_cost: l.unit_cost,
         retail_price: l.retail_price,
+        barcode: l.barcode || null,
       }))
     )
 
@@ -368,6 +434,35 @@ export default function ImportOrder() {
               </select>
             )}
           </div>
+
+          {sheets.length > 1 && (
+            <div className="field">
+              <label>Which sheets should we read?</label>
+              <p className="field-hint" style={{ marginTop: 0, marginBottom: 8 }}>
+                Suppliers often split an order across sheets, one per delivery. Tick every sheet
+                that holds order lines ~ the same column mapping is used for all of them, and a
+                product appearing on several sheets has its quantities added together.
+              </p>
+              <div className="loc-chips">
+                {sheets.map((sh, i) => {
+                  const on = chosenSheets.includes(i)
+                  return (
+                    <button
+                      key={sh.name}
+                      className={'loc-chip' + (on ? ' on' : '')}
+                      onClick={() =>
+                        setChosenSheets(
+                          on ? chosenSheets.filter((x) => x !== i) : [...chosenSheets, i]
+                        )
+                      }
+                    >
+                      {sh.name}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
           <p className="page-desc" style={{ marginBottom: 12 }}>
             Click the row that names the columns ~ the one with things like Code, Description and
@@ -537,6 +632,32 @@ export default function ImportOrder() {
             </div>
           </div>
 
+          {parsed.perSheet.length > 1 && (
+            <div className="card" style={{ marginBottom: 16 }}>
+              <h3 className="section-title">Sheets read</h3>
+              <div className="table-wrap">
+                <table className="table">
+                  <thead><tr><th>Sheet</th><th className="num">Lines found</th><th></th></tr></thead>
+                  <tbody>
+                    {parsed.perSheet.map((sh) => (
+                      <tr key={sh.name}>
+                        <td className="cell-strong">{sh.name}</td>
+                        <td className="num">{sh.lines}</td>
+                        <td>
+                          {!sh.found
+                            ? <span className="status-pill bad">Headings not found</span>
+                            : sh.lines === 0
+                              ? <span className="status-pill neutral">Nothing to import</span>
+                              : <span className="status-pill ok">Read</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {mapping.total_check != null && parsed.theirTotal !== parsed.total && (
             <div className="auth-msg err" style={{ marginBottom: 16 }}>
               Our total does not match theirs. Check the size columns ~ one may be missed or
@@ -555,6 +676,7 @@ export default function ImportOrder() {
                 <thead>
                   <tr>
                     <th>Code</th><th>Product</th><th>Colour</th><th>Size</th>
+                    {mapping.barcode != null && <th>Barcode</th>}
                     <th className="num">Qty</th><th className="num">Cost</th>
                   </tr>
                 </thead>
@@ -565,6 +687,9 @@ export default function ImportOrder() {
                       <td>{l.name}</td>
                       <td>{l.colour || '-'}</td>
                       <td>{l.size}</td>
+                      {mapping.barcode != null && (
+                        <td className="cell-sub">{l.barcode || '-'}</td>
+                      )}
                       <td className="num">{l.qty}</td>
                       <td className="num">{l.unit_cost ? l.unit_cost.toFixed(2) : '-'}</td>
                     </tr>
@@ -575,6 +700,14 @@ export default function ImportOrder() {
                 <p className="field-hint">Showing the first 300 of {parsed.lines.length}.</p>
               )}
             </div>
+
+            {mapping.barcode != null && (
+              <div className="placeholder-note" style={{ marginTop: 12 }}>
+                Barcodes are taken from the product row, so every size on that row gets the same
+                one. That is right for single size products, but if their file lists a barcode per
+                size you will want to import those separately once the order is in.
+              </div>
+            )}
 
             <div className="page-actions" style={{ marginTop: 16 }}>
               <span className="field-hint" style={{ margin: 0 }}>
